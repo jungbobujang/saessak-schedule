@@ -122,11 +122,12 @@ function filterFor(session, d, range) {
   return { programs: programs, blocks: blocks };
 }
 
-// 선생님에게 나가는 명단에는 code 를 넣지 않는다.
+// 선생님에게 나가는 명단에는 code 도 grade 도 넣지 않는다.
+// 화면에서 감추는 것이 아니라 **응답에 아예 담지 않는다** — 등급은 담당자만 보는 값이다.
 function publicTeachers(session, d) {
   return d.room.teachers.map(function (t) {
     var out = { id: t.id, name: t.name, cls: t.cls, color: t.color };
-    if (session.role === 'master') out.code = t.code;
+    if (session.role === 'master') { out.code = t.code; out.grade = t.grade; }
     return out;
   });
 }
@@ -332,7 +333,8 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
         name: clean(t && t.name, 20),
         cls: clean(t && t.cls, 10),
         code: id === 'master' ? '' : code,   // 마스터 코드는 환경변수라 파일에 두지 않는다
-        color: (t && t.color) || store.PALETTE[i % store.PALETTE.length]
+        color: (t && t.color) || store.PALETTE[i % store.PALETTE.length],
+        grade: store.normGrade(t && t.grade)
       });
     });
     if (!seen['master']) {
