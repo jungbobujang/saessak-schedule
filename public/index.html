@@ -201,8 +201,14 @@ button:hover{background:#eef1ea}
 .vis .hint{font-size:12px;color:var(--dim);margin:4px 0 0 24px}
 .slotpick{display:flex;gap:6px}
 .slotpick .slot-btn{flex:1;padding:8px 0}
-.slotpick .slot-btn.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
-.slotpick .slot-btn.on:hover{background:#276749}
+.slot-btn.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+.slot-btn.on:hover{background:#276749}
+/* 공개 범위는 말이 길다('안 되는 것만 알리기'). 셋을 옆으로 붙이면 좁은 패널에서
+   글자가 서너 줄로 접힌다 — 세로로 세우고 왼쪽 정렬해 한 줄로 읽히게 둔다. */
+.vispick{display:flex;flex-direction:column;gap:6px}
+.vispick .slot-btn{width:100%;padding:9px 11px;text-align:left}
+/* 고른 것에 따라 바뀌는 한 줄 설명 */
+.pickhint{font-size:12px;color:var(--dim);margin:5px 0 0}
 .checks .when{color:var(--dim);font-size:12px;margin-left:4px}
 /* 쉬는 날에 배정하려 할 때 — 막지 않고 확인만 구한다 */
 .holwarn{margin-top:10px;padding:9px;border:1px solid #e6d08a;background:#fdf8e6;color:#7a5c12;
@@ -318,7 +324,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
       <div class="panel hide" id="day-inline" style="margin-top:10px"></div>
       <div class="chips" id="chips"></div>
       <div class="note-line hide" id="teacher-note">
-        내 수업과 내가 적은 안 되는 날만 보입니다. 다른 선생님이 적은 안 되는 날은 보이지 않습니다.
+        내 수업과 내가 적은 안 되는 날이 보입니다. 다른 선생님이 적은 안 되는 날은 그분이 알리기로 한 것만 보입니다.
       </div>
       <div class="legend">
         <span><i class="lg-p"></i>디지털새싹 수업</span>
@@ -573,8 +579,12 @@ function pickColor(usedColors) { return Palette.pick(usedColors); }
 
 // 겹침: 같은 날, 그 수업 담당인 사람의 '안 되는 날' 이고, 시간대까지 부딪히는가.
 // 시간대 판정은 서버와 같은 파일(Slots)을 쓴다.
+// 선생님 화면에서는 **내가 적은 것만** 겹침으로 센다. 남이 알려 준 안 되는 날은
+// 알아 두시라고 보이는 것이지, 내 수업이 어긋났다는 표시가 아니다.
 function clashesOn(date) {
-  var bs = S.blocks.filter(function (b) { return b.date === date; });
+  var bs = S.blocks.filter(function (b) {
+    return b.date === date && (S.role === 'master' || b.teacherId === S.me.id);
+  });
   var out = [];
   S.programs.filter(function (p) { return p.date === date; }).forEach(function (p) {
     bs.forEach(function (b) {
@@ -835,8 +845,11 @@ function programCardEl(pr) {
   return c;
 }
 
+// 남이 알린 '안 되는 날' 앞에는 누가 적었는지를 붙인다. 내 것에는 붙이지 않는다 —
+// 자기 화면에서 자기 이름을 읽는 일은 없다.
+function blockWho(bl) { return bl.teacherId === S.me.id ? '' : nameOf(bl.teacherId) + ' · '; }
 function blockCardEl(bl) {
-  var label = (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + Slots.blockCardText(bl);
+  var label = blockWho(bl) + Slots.blockCardText(bl);
   var c = el('div', 'card block');
   c.title = label;
   c.appendChild(el('div', 'c1', label));
@@ -882,7 +895,7 @@ function dayCell(dateObj, monthNo) {
       if (shown >= 4) return;
       shown++;
       var d = el('span', 'pdot block');
-      d.title = Slots.blockCardText(bl);
+      d.title = blockWho(bl) + Slots.blockCardText(bl);
       if (blockClashes(bl)) d.classList.add('clash');
       dots.appendChild(d);
     });
@@ -1082,10 +1095,14 @@ function renderPanel() {
   });
 
   bls.forEach(function (bl) {
+    var mine = bl.teacherId === S.me.id;
     var r = el('div', 'row' + (blockClashes(bl) ? ' clash' : ''));
     r.appendChild(el('div', 'ttl', Slots.memoOf(bl) || Slots.EMPTY_MEMO));
-    r.appendChild(el('div', 'who', (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + Slots.slotLabel(bl)));
-    if (S.role === 'master' || bl.teacherId === S.me.id) {
+    r.appendChild(el('div', 'who', blockWho(bl) + Slots.slotLabel(bl)));
+    // 공개 범위는 내가 적은 것에만, 그것도 여기 상세에만 적는다. 달력 카드에는 붙이지
+    // 않는다 — 남의 카드에 '메모까지 알림' 이 붙으면 그 사람의 선택이 구경거리가 된다.
+    if (mine) r.appendChild(el('div', 'who', Slots.visTagLabel(Slots.visOf(bl), S.role === 'master')));
+    if (S.role === 'master' || mine) {
       var acts2 = el('div', 'rowacts');
       var fix = el('button', 'btn-sm', '고치기');
       fix.addEventListener('click', function () { openBlockForm(bl); });
@@ -1332,9 +1349,10 @@ function openBlockForm(bl) {
   box.appendChild(el('h2', null, bl ? '안 되는 날 고치기' : '이날 안 돼요'));
   var f = el('div', 'form');
 
+  // 날짜는 고칠 때에도 바꿀 수 있다. 하루가 밀린 것을 지웠다 다시 적게 하면
+  // 그 사이 담당자가 본 화면에서 그날이 잠깐 비어 버린다.
   f.appendChild(el('label', null, '날짜'));
   var d = el('input'); d.type = 'date'; d.value = bl ? bl.date : S.pick;
-  if (bl) d.disabled = true;   // 날짜를 바꾸는 것은 '고치기' 가 아니라 다른 날 이야기다
   f.appendChild(d);
 
   // 시간대는 버튼 셋 중 하나. 기본은 종일이고, 고른 것만 진하게 남는다.
@@ -1352,7 +1370,29 @@ function openBlockForm(bl) {
     slotBox.appendChild(b);
   });
   f.appendChild(slotBox);
-  f.appendChild(el('div', 'hint', '오전도 오후도 안 되면 종일을 고르세요.'));
+  f.appendChild(el('div', 'pickhint', '오전도 오후도 안 되면 종일을 고르세요.'));
+
+  // 누가 볼 수 있나요 — 기본은 '나와 담당자만' 이다. 알리는 것은 고르는 일이지
+  // 기본값이 아니다. 담당자에게는 '담당자' 가 자기 자신이므로 '나만' 으로 적는다.
+  var iAmMaster = S.role === 'master';
+  f.appendChild(el('label', null, '누가 볼 수 있나요'));
+  var vis = bl ? Slots.visOf(bl) : 'private';
+  var visBox = el('div', 'vispick');
+  var visBtns = {};
+  var visHint = el('div', 'pickhint');
+  Slots.VIS.forEach(function (key) {
+    var vb = el('button', 'slot-btn' + (key === vis ? ' on' : ''), Slots.visBtnLabel(key, iAmMaster));
+    vb.addEventListener('click', function () {
+      vis = key;
+      Object.keys(visBtns).forEach(function (k) { visBtns[k].classList.toggle('on', k === key); });
+      visHint.textContent = Slots.VIS_HINT[key];
+    });
+    visBtns[key] = vb;
+    visBox.appendChild(vb);
+  });
+  visHint.textContent = Slots.VIS_HINT[vis];
+  f.appendChild(visBox);
+  f.appendChild(visHint);
 
   // 이유는 묻지 않는다. 적고 싶은 사람만 적는다.
   f.appendChild(el('label', null, '메모'));
@@ -1368,15 +1408,20 @@ function openBlockForm(bl) {
     save.disabled = true;
     msg.className = 'formmsg'; msg.textContent = '';
     try {
-      if (bl) await api('PUT', '/api/blocks/' + bl.id, { slot: slot, memo: memo.value });
-      else await api('POST', '/api/blocks', { date: d.value, slot: slot, memo: memo.value });
+      var body = { date: d.value, slot: slot, memo: memo.value, visibility: vis };
+      if (bl) await api('PUT', '/api/blocks/' + bl.id, body);
+      else await api('POST', '/api/blocks', body);
       closeForm();
       await refresh();
       toast('저장했어요');
     } catch (e) {
       save.disabled = false;
       msg.className = 'formmsg bad';
-      msg.textContent = '저장하지 못했어요: ' + e.message + ' 잠시 뒤 다시 눌러 주세요.';
+      // 400 은 값이 문제라는 뜻이다 — 서버가 짚어 준 말을 그대로 두고
+      // '잠시 뒤 다시' 같은 헛된 안내를 붙이지 않는다. 기다려도 달라지지 않는다.
+      msg.textContent = (e.status === 400)
+        ? e.message
+        : '저장하지 못했어요: ' + e.message + ' 잠시 뒤 다시 눌러 주세요.';
     }
   });
   acts.appendChild(save);

@@ -20,10 +20,44 @@
   var LABEL = { all: '종일', am: '오전', pm: '오후' };
   var EMPTY_MEMO = '안 돼요';   // 예전 기본 제목
 
+  // 공개 범위 — 그 '안 되는 날' 을 다른 선생님에게 어디까지 보일지.
+  //   private  나와 담당자만 (기본)
+  //   fact     안 된다는 사실만. 메모는 응답에 담기지도 않는다
+  //   full     메모까지
+  // 알리는 것은 **고르는 일**이지 기본값이 아니다. 그래서 값이 없으면 private 로 본다
+  // (옛 자료에는 이 칸이 아예 없다 — 파일을 고치지 않고 읽을 때 채운다).
+  var VIS = ['private', 'fact', 'full'];
+  var VIS_RANK = { private: 0, fact: 1, full: 2 };
+  // 폼 단추에 적는 말. 담당자에게는 '담당자' 가 자기 자신이라 '나만' 이 된다.
+  var VIS_BTN = { private: '나와 담당자만', fact: '안 되는 것만 알리기', full: '메모까지 알리기' };
+  var VIS_BTN_MASTER = { private: '나만', fact: '안 되는 것만 알리기', full: '메모까지 알리기' };
+  // 내가 적은 것의 상세에 붙는 작은 회색 말
+  var VIS_TAG = { private: '나와 담당자만', fact: '안 되는 것만 알림', full: '메모까지 알림' };
+  var VIS_TAG_MASTER = { private: '나만', fact: '안 되는 것만 알림', full: '메모까지 알림' };
+  var VIS_HINT = {
+    private: '다른 선생님에게는 보이지 않아요.',
+    fact: '다른 선생님 달력에 \'안 돼요\'만 보여요.',
+    full: '다른 선생님에게 메모까지 보여요.'
+  };
+
   function isSlot(v) { return SLOTS.indexOf(v) >= 0; }
   function slotOf(block) {
     return (block && isSlot(block.slot)) ? block.slot : 'all';
   }
+  function isVis(v) { return VIS.indexOf(v) >= 0; }
+  function visOf(block) { return (block && isVis(block.visibility)) ? block.visibility : 'private'; }
+  // 여러 장을 한 장으로 합칠 때는 **가장 좁은 것**을 따른다. 오전은 알리지 않기로 하고
+  // 오후만 알리기로 했다면, 합쳐진 한 장이 오전 메모까지 데리고 나가서는 안 된다.
+  function narrowestVis(list) {
+    if (!list || !list.length) return 'private';
+    var out = 'full';
+    list.forEach(function (b) {
+      if (VIS_RANK[visOf(b)] < VIS_RANK[out]) out = visOf(b);
+    });
+    return out;
+  }
+  function visBtnLabel(v, isMaster) { return (isMaster ? VIS_BTN_MASTER : VIS_BTN)[v] || VIS_BTN[v]; }
+  function visTagLabel(v, isMaster) { return (isMaster ? VIS_TAG_MASTER : VIS_TAG)[v] || VIS_TAG[v]; }
   function memoOf(block) {
     if (!block) return '';
     var m = (block.memo != null) ? String(block.memo) : String(block.title || '');
@@ -73,7 +107,10 @@
 
   return {
     SLOTS: SLOTS, LABEL: LABEL, NOON: NOON, EMPTY_MEMO: EMPTY_MEMO,
+    VIS: VIS, VIS_HINT: VIS_HINT,
     isSlot: isSlot, slotOf: slotOf, memoOf: memoOf, slotLabel: slotLabel,
+    isVis: isVis, visOf: visOf, narrowestVis: narrowestVis,
+    visBtnLabel: visBtnLabel, visTagLabel: visTagLabel,
     blockCardText: blockCardText, blockHitsProgram: blockHitsProgram, dayStatus: dayStatus
   };
 });

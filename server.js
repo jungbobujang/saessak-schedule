@@ -100,6 +100,8 @@ function isDate(s) {
   return !isNaN(d.getTime());
 }
 function isTime(s) { return RE_TIME.test(String(s || '')); }
+// 공개 범위가 어긋났을 때의 말. 서버가 되돌리면 화면은 이 문장을 폼 안에 그대로 띄운다.
+var VIS_ERROR = '누가 볼 수 있는지는 나와 담당자만·안 되는 것만·메모까지 중에서 골라 주세요.';
 function clean(s, max) { return String(s == null ? '' : s).trim().slice(0, max || 200); }
 function nowIso() { return new Date().toISOString(); }
 
@@ -148,24 +150,40 @@ function mergeBlocks(list) {
     var slot = (slots.all || (slots.am && slots.pm)) ? 'all' : (slots.am ? 'am' : 'pm');
     return {
       id: group[0].id, date: group[0].date, teacherId: group[0].teacherId,
-      slot: slot, memo: memos.join('/'), updatedAt: group[0].updatedAt, mergedFrom: group.length
+      slot: slot, memo: memos.join('/'), visibility: Slots.narrowestVis(group),
+      updatedAt: group[0].updatedAt, mergedFrom: group.length
     };
   });
 }
 
-// 요청자 시점 필터. 선생님에게는 남의 '안 되는 날'을 아예 담지 않는다.
+// 남이 적은 '안 되는 날' 을 선생님에게 어디까지 내보낼지.
+// 화면에서 감추는 것이 아니라 **응답에 담지 않는다** — private 는 아예 빠지고,
+// fact 는 memo 라는 칸 자체가 없다(빈 문자열로도 나가지 않는다).
+function shareBlock(b) {
+  var v = Slots.visOf(b);
+  if (v === 'private') return null;
+  var out = { id: b.id, date: b.date, teacherId: b.teacherId, slot: Slots.slotOf(b) };
+  if (v === 'full') out.memo = Slots.memoOf(b);
+  return out;
+}
+
+// 요청자 시점 필터. 선생님에게는 남의 '안 되는 날'을 그 사람이 알리기로 한 만큼만 담는다.
 function filterFor(session, d, range) {
   var inRange = function (dt) { return dt >= range.from && dt <= range.to; };
   var programs = d.programs.filter(function (p) { return inRange(p.date); });
-  var blocks = d.blocks.filter(function (b) { return inRange(b.date); });
+  // 합치기가 먼저다 — 같은 사람의 하루가 여러 장이면 그 묶음의 공개 범위를 정한 뒤에
+  // 걸러야, 좁게 적어 둔 쪽의 메모가 넓은 쪽에 얹혀 새어 나가지 않는다.
+  var blocks = mergeBlocks(d.blocks.filter(function (b) { return inRange(b.date); }));
   if (session.role !== 'master') {
     var id = session.teacherId;
     programs = programs.filter(function (p) {
       return (p.teacherIds || []).indexOf(id) >= 0 || p.visibility === 'all';
     });
-    blocks = blocks.filter(function (b) { return b.teacherId === id; });
+    blocks = blocks.map(function (b) {
+      return b.teacherId === id ? b : shareBlock(b);   // 내 것은 그대로, 남의 것은 걸러서
+    }).filter(Boolean);
   }
-  return { programs: programs, blocks: mergeBlocks(blocks) };
+  return { programs: programs, blocks: blocks };
 }
 
 // 선생님에게 나가는 명단에는 code 도 grade 도 넣지 않는다.
@@ -336,6 +354,12 @@ app.post('/api/blocks', requireAuth, function (req, res) {
   if (!Slots.isSlot(slot)) {
     return res.status(400).json({ error: '시간대는 종일·오전·오후 중에서 골라 주세요.' });
   }
+  // 공개 범위도 마찬가지다. 빠져 있으면 가장 좁은 쪽(나와 담당자만)으로 두되,
+  // 엉뚱한 값이면 조용히 좁히지 않고 되돌린다 — 어느 쪽으로 조용히 정해도 사고가 된다.
+  var vis = (b.visibility === undefined || b.visibility === null || b.visibility === '') ? 'private' : b.visibility;
+  if (!Slots.isVis(vis)) {
+    return res.status(400).json({ error: VIS_ERROR });
+  }
 
   var d = store.load();
   if (!d.room.teachers.some(function (t) { return t.id === target; })) {
@@ -350,6 +374,7 @@ app.post('/api/blocks', requireAuth, function (req, res) {
     var keep = mine[0];
     keep.slot = slot;
     keep.memo = memo;
+    keep.visibility = vis;
     keep.updatedAt = nowIso();
     d.blocks = d.blocks.filter(function (x) { return !x._drop; });
     store.save(d);
@@ -362,6 +387,7 @@ app.post('/api/blocks', requireAuth, function (req, res) {
     teacherId: target,
     slot: slot,
     memo: memo,
+    visibility: vis,
     updatedAt: nowIso()
   };
   d.blocks.push(made);
@@ -378,13 +404,29 @@ app.put('/api/blocks/:id', requireAuth, function (req, res) {
   if (req.session.role !== 'master' && target.teacherId !== req.session.teacherId) {
     return res.status(403).json({ error: '내가 적은 것만 고칠 수 있어요.' });
   }
-  if (b.slot !== undefined) {
-    if (!Slots.isSlot(b.slot)) {
-      return res.status(400).json({ error: '시간대는 종일·오전·오후 중에서 골라 주세요.' });
-    }
-    target.slot = b.slot;
+  // 값은 **모두 검사한 뒤에** 한꺼번에 적는다. 중간에 되돌아가면 반만 바뀐 기록이 남고,
+  // 되돌린 응답을 받은 사람은 아무것도 안 바뀐 줄 안다.
+  if (b.slot !== undefined && !Slots.isSlot(b.slot)) {
+    return res.status(400).json({ error: '시간대는 종일·오전·오후 중에서 골라 주세요.' });
   }
+  if (b.visibility !== undefined && !Slots.isVis(b.visibility)) {
+    return res.status(400).json({ error: VIS_ERROR });
+  }
+  if (b.date !== undefined && b.date !== target.date) {
+    if (!isDate(b.date)) return res.status(400).json({ error: '날짜를 확인해 주세요.' });
+    // 한 사람의 하루에는 한 장이다. 옮겨 갈 날에 이미 적어 둔 것이 있으면 말없이 합치지
+    // 않는다 — 두 장의 메모 중 어느 것을 살릴지는 사람이 정할 일이다.
+    var busy = d.blocks.some(function (x) {
+      return x.id !== target.id && x.teacherId === target.teacherId && x.date === b.date;
+    });
+    if (busy) {
+      return res.status(400).json({ error: '그날에는 이미 적어 둔 게 있어요. 그걸 고치시거나 먼저 지워 주세요.' });
+    }
+    target.date = b.date;
+  }
+  if (b.slot !== undefined) target.slot = b.slot;
   if (b.memo !== undefined) target.memo = clean(b.memo, 100);
+  if (b.visibility !== undefined) target.visibility = b.visibility;
   delete target.title;          // 옛 형식이 남아 있었다면 여기서 정리된다
   target.updatedAt = nowIso();
   store.save(d);
