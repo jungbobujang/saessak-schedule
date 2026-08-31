@@ -227,7 +227,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
       </div>
       <div class="chips" id="chips"></div>
       <div class="note-line hide" id="teacher-note">
-        내 수업과 내가 적은 안 되는 날만 보입니다. 다른 선생님 일정은 담당자만 봅니다.
+        내 수업과 내가 적은 안 되는 날만 보입니다. 다른 선생님이 적은 안 되는 날은 보이지 않습니다.
       </div>
       <div class="legend">
         <span><i class="lg-p"></i>디지털새싹 수업</span>
@@ -404,21 +404,15 @@ var TEACHER_CARD = '#2f855a';
 
 // 선생님 화면에서 수업의 담당을 적는 말. 본인 이름은 절대 쓰지 않는다 —
 // 자기 화면에서 자기 이름을 읽는 일은 없다. 대신 '내 수업' 이다.
-function teacherOwnerText(pr, meId, nameFn, masterNm) {
+// 담당자도 여기서는 그냥 한 사람의 이름으로 선다. 선생님에게 '담당자' 라는 직함이나
+// '전체 공개' 같은 운영 용어는 알 필요도, 볼 이유도 없는 말이다.
+function teacherOwnerText(pr, meId, nameFn) {
   var ids = pr.teacherIds || [];
-  var mine = ids.indexOf(meId) >= 0;
-  var others = ids.filter(function (id) { return id !== meId && id !== 'master'; });
-  var hasMaster = ids.indexOf('master') >= 0;
-  var tail = (hasMaster && masterNm) ? ' · ' + masterNm + ' 선생님(담당자) 참석' : '';
-  if (mine) {
-    var base = '내 수업';
-    if (others.length) base += ' · ' + others.map(nameFn).join(', ') + ' 선생님과 함께';
-    return base + tail;
+  var others = ids.filter(function (id) { return id !== meId; });
+  if (ids.indexOf(meId) >= 0) {
+    return others.length ? '내 수업 · ' + others.map(nameFn).join(', ') + ' 선생님과 함께' : '내 수업';
   }
-  // 내 담당이 아닌데 보인다는 것은 전체 공개 수업이라는 뜻이다
-  if (!others.length && hasMaster && masterNm) return masterNm + ' 선생님(담당자) 수업 · 전체 공개';
-  var who = others.length ? others.map(nameFn).join(', ') + ' 선생님 수업' : '전체 공개 수업';
-  return who + ' · 전체 공개' + tail;
+  return (others.length ? others.map(nameFn).join(', ') : '담당 미정') + ' 수업';
 }
 
 // 상세 패널 수업 카드의 둘째 줄. 담당자 시점의 말은 role === 'master' 안에만 두고
@@ -432,15 +426,21 @@ function programOwnerLine(pr, role, meId, nameFn, masterNm) {
     if (pr.visibility === 'all') line += ' · 전체 공개';
     return line;
   }
-  return t + ' · ' + teacherOwnerText(pr, meId, nameFn, masterNm);
+  return t + ' · ' + teacherOwnerText(pr, meId, nameFn);
 }
 
 // 카드 글자와 표식을 만드는 순수 함수. 화면 밖에서도 그대로 부를 수 있게
 // S 를 건드리지 않고 이름 찾기 함수를 받는다(검증에서 이 함수를 직접 부른다).
-function programCardParts(pr, role, nameFn) {
-  var prefix = (role === 'master') ? namesInOrder(pr).map(nameFn).join('·') : '';
+function programCardParts(pr, role, nameFn, meId) {
+  var prefix = '';
   var marks = [];
-  if (pr.visibility === 'all') marks.push('전체 공개');
+  if (role === 'master') {
+    prefix = namesInOrder(pr).map(nameFn).join('·');
+    if (pr.visibility === 'all') marks.push('전체 공개');
+  } else if ((pr.teacherIds || []).indexOf(meId) < 0) {
+    // 내 담당이 아닌데 보이는 수업 — 누구 수업인지 이름으로만 말한다
+    prefix = (pr.teacherIds || []).map(nameFn).join('·');
+  }
   return { text: pr.start + ' ' + (prefix ? prefix + ' · ' : '') + pr.title, marks: marks };
 }
 
@@ -636,7 +636,7 @@ function dayCell(dateObj, monthNo) {
   cell.appendChild(head);
 
   S.programs.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (pr) {
-    var parts = programCardParts(pr, S.role, nameOf);
+    var parts = programCardParts(pr, S.role, nameOf, S.me.id);
     var c = el('div', 'card');
     if (S.role === 'master') {
       c.style.background = colorOf(pr);          // 담당자 화면: 담당 선생님 신분 색
@@ -754,7 +754,7 @@ function renderPanel() {
       // 선생님 화면에서는 그 '안 된다고 적은 사람' 이 언제나 본인이다
       var mn = masterName();
       txt = '이날 안 된다고 적으셨어요. ' +
-        (mn ? mn + ' 선생님(담당자)' : '담당자') + '에게도 같은 표시가 보입니다.';
+        (mn ? mn + ' 선생님에게도' : '담당 선생님께도') + ' 같은 표시가 보입니다.';
     }
     box.appendChild(el('div', 'clash-box', txt));
   }
