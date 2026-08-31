@@ -42,14 +42,25 @@ button:hover{background:#eef1ea}
 .badge{background:#eef1ea;border-radius:999px;padding:4px 11px;font-size:13px;color:#3f4a3a}
 .side-door{font-size:13px}
 
-.wrap{display:flex;gap:16px;align-items:flex-start;padding:16px;max-width:1240px;margin:0 auto}
-.left{flex:1;min-width:0}
-.right{width:320px;flex:none}
-@media (max-width:880px){ .wrap{flex-direction:column;padding:12px} .right{width:100%} }
+.wrap{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start;
+  padding:16px;max-width:1400px;margin:0 auto}
+.left{min-width:0}
+/* 상세는 스크롤을 따라온다 — 아래쪽 주를 보다가도 오늘 칸의 내용을 잃지 않게 */
+.right{position:sticky;top:16px}
+@media (max-width:960px){ .wrap{grid-template-columns:1fr 260px} }
+
+/* 보기 전환 탭 — 좁은 화면에서만 쓴다 */
+.tabs{display:none;gap:6px;margin-bottom:10px}
+.tabs button{flex:1;padding:10px 0;font-size:14px}
+.tabs button.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+.tabs button.on:hover{background:#276749}
 
 /* ── 달력 ─────────────────────────────────── */
-.calbar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
-.calbar .month{font-size:17px;font-weight:600;min-width:120px}
+/* [‹] 2026년 9월 [›]  [이번 달] — 이동 단추를 달 이름 양옆에 붙여 둔다 */
+.calbar{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.calbar .month{font-size:17px;font-weight:600;min-width:110px;text-align:center}
+.calbar .spacer{width:10px}
+.calbar .nav{width:36px;padding:7px 0;text-align:center}
 .grid{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 /* minmax(0,1fr) 이 핵심이다. 그냥 1fr 이면 최소 크기가 '내용 크기' 라서
    긴 제목 한 줄이 그 열을 통째로 넓히고 나머지 요일이 찌그러진다. */
@@ -57,8 +68,11 @@ button:hover{background:#eef1ea}
 .dow div{padding:8px 0;text-align:center;font-size:13px;color:var(--dim);background:#fafbf8;border-bottom:1px solid var(--line)}
 .dow .sun,.day.sun .dnum{color:var(--red)}
 .dow .sat,.day.sat .dnum{color:var(--blue)}
-.day{min-height:104px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);
-  padding:5px 5px 16px;position:relative;background:#fff;min-width:0;overflow:hidden}
+/* 칸은 내용에 맞춰 세로로 늘어난다. 같은 주의 칸은 그리드라 자연히 같은 높이가 된다.
+   overflow:hidden 을 두지 않는 것이 이 판의 핵심이다 — 글자를 자르지 않는다. */
+.day{min-height:112px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+  padding:5px 5px 7px;background:#fff;min-width:0}
+.day:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
 .day:nth-child(7n){border-right:none}
 .day.other{background:#fbfbfa}
 .day.other .dnum{color:#c2c8bd}
@@ -66,24 +80,28 @@ button:hover{background:#eef1ea}
 .day.pick{outline:2px solid var(--green);outline-offset:-2px}
 .day.clickable{cursor:pointer}
 .day.clickable:hover{background:#f4f7f1}
-.dhead{display:flex;align-items:baseline;gap:4px;min-width:0}
+.dhead{display:flex;align-items:baseline;gap:4px;min-width:0;flex-wrap:wrap}
 .dnum{font-size:13px;font-weight:600;flex:none}
+/* '가능 n/총원' 은 날짜 숫자 오른쪽 알약으로. 카드 위에 겹쳐 앉지 않는다. */
+.freepill{font-size:11px;color:var(--dim);background:#eef1ea;border-radius:999px;padding:0 6px;flex:none}
 .today .dnum{background:var(--green);color:#fff;border-radius:999px;padding:1px 7px}
 /* 공휴일·학교 휴업일 */
 .day.holiday{background:#fdf3f5}
 .day.holiday .dnum{color:var(--red)}
 .day.holiday.today .dnum{color:#fff}
-.hname{font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.hname{font-size:11px;color:var(--dim);min-width:0}
 .lg-h{background:#fdf3f5;border:1px solid #f0c6c6}
-.free{position:absolute;right:5px;bottom:3px;font-size:11px;color:var(--dim)}
 
-/* 카드는 열 너비를 넘지 않는다. 전체 제목은 title 속성(마우스)과 상세 패널에서 본다. */
-.card{margin-top:3px;padding:2px 5px;border-radius:5px;font-size:11.5px;line-height:1.35;
-  color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
-  display:flex;align-items:center;gap:3px}
-.card .card-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-.card .mark{flex:none;font-size:10px}
-/* 담당이 여러 명일 때 카드 끝에 나머지 사람의 색을 점으로 남긴다 */
+/* 카드는 글자를 자르지 않는다. 길면 줄을 바꾸고 칸이 세로로 늘어난다.
+   keep-all 은 한글 단어가 가운데서 끊기지 않게, anywhere 는 아주 긴 영문·URL 대비. */
+.card{margin-top:3px;padding:3px 6px;border-radius:6px;font-size:12px;line-height:1.35;
+  color:#fff;max-width:100%;white-space:normal;word-break:keep-all;overflow-wrap:anywhere;cursor:pointer}
+.card:hover{filter:brightness(.92)}
+.card .c1{font-weight:600}
+.card .c1 .t{font-weight:400;opacity:.85;margin-right:3px}
+.card .c2{font-size:11px;opacity:.85;margin-top:1px;display:flex;align-items:center;gap:3px;flex-wrap:wrap}
+.card .mark{font-size:10px}
+/* 담당이 여러 명일 때 2행 끝에 나머지 사람의 색을 점으로 남긴다 */
 .card .co-dot{display:inline-block;width:6px;height:6px;border-radius:50%;flex:none;
   border:1px solid rgba(255,255,255,.7)}
 /* 내 담당이 아닌데 보이는 수업(전체 공개) — 내 것이 아님이 한눈에 드러나게 흰 바탕 */
@@ -137,6 +155,33 @@ button:hover{background:#eef1ea}
 .g-name{color:var(--dim);font-size:12px;margin-left:4px}
 .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .empty{color:var(--dim);font-size:13px}
+/* 카드 안 작은 단추 — 링크 글씨보다 손이 닿기 쉽다 */
+.rowacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.btn-sm{padding:4px 9px;font-size:12.5px;border-radius:7px}
+
+/* 저장했다는 말은 잠깐 떴다 사라진다. 실패는 폼 안에 남는다. */
+#toast{position:fixed;right:16px;bottom:16px;z-index:60;background:#23271f;color:#fff;
+  padding:10px 14px;border-radius:10px;font-size:13.5px;box-shadow:0 6px 20px rgba(0,0,0,.22);
+  opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s;pointer-events:none}
+#toast.on{opacity:1;transform:translateY(0)}
+
+/* 다가오는 일정(좁은 화면 기본 보기) */
+.up-day{margin-bottom:14px}
+.up-head{display:flex;align-items:baseline;gap:8px;width:100%;justify-content:flex-start;
+  background:none;border:none;padding:6px 0;border-bottom:1px solid var(--line);margin-bottom:6px}
+.up-head:hover{background:#f4f7f1}
+.up-date{font-weight:600}
+.up-dow{font-size:12.5px;color:var(--dim)}
+.up-hol{font-size:12px;color:var(--red)}
+.up-empty{color:var(--dim);font-size:13px;padding:10px 0}
+
+/* 점 달력(좁은 화면) */
+.dots{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
+.pdot{width:6px;height:6px;border-radius:50%}
+.pdot.block{background:var(--dim);
+  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.5) 0 2px,transparent 2px 4px)}
+.pdot.clash{outline:1.5px solid var(--red);outline-offset:1px}
+.dots .more{font-size:10px;color:var(--dim);line-height:6px}
 
 /* ── 폼 ───────────────────────────────────── */
 .form label{display:block;font-size:12.5px;color:var(--dim);margin:10px 0 4px}
@@ -189,6 +234,35 @@ td input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--lin
 .cpop-cur-label{font-size:12px;color:var(--dim)}
 .card .co-more{opacity:.85}
 td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer}
+
+/* ── 좁은 화면(≤720px) ─────────────────────── */
+@media (max-width:720px){
+  .wrap{display:block;padding:12px}
+  .right{position:static;margin-top:12px}
+  .tabs{display:flex}
+  .top{padding:10px 12px;gap:8px}
+  .top h1{font-size:16px;min-width:0}
+  /* 설정·나가기는 ⋯ 안으로 들어간다 */
+  .top-actions{position:absolute;right:12px;top:46px;background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:6px;display:none;flex-direction:column;gap:6px;z-index:20;
+    box-shadow:0 6px 18px rgba(0,0,0,.14)}
+  .top-actions.open{display:flex}
+  .top-more{display:block}
+  .calbar .nav{width:44px;min-height:44px}
+  .calbar button{min-height:44px}
+  .day{min-height:56px;padding:4px}
+  .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}
+  .chip{flex:none}
+  .clash-sum{margin-left:0;flex:none}
+  .form input[type=text],.form input[type=date],.form input[type=time],.form textarea,
+  #view-login input{min-height:44px}
+  .slotpick .slot-btn{min-height:44px}
+  .acts{flex-direction:column;align-items:stretch}
+  .acts button{width:100%;min-height:44px}
+  .rowacts{flex-direction:row}
+  .rowacts button{min-height:36px}
+}
+.top-more{display:none}
 .warn-cell{color:var(--red);font-size:12px}
 .setup-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 </style>
@@ -211,15 +285,27 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
   <div class="top">
     <h1>🌱 <span id="cal-room"></span></h1>
     <span class="badge" id="cal-me"></span>
-    <button class="linkish side-door hide" id="go-setup">설정</button>
-    <button id="cal-out">나가기</button>
+    <button class="top-more" id="top-more" aria-label="메뉴 열기">⋯</button>
+    <span class="top-actions" id="top-actions">
+      <button class="linkish side-door hide" id="go-setup">설정</button>
+      <button id="cal-out">나가기</button>
+    </span>
   </div>
   <div class="wrap">
     <div class="left">
+      <div class="tabs" id="tabs">
+        <button id="tab-list">다가오는 일정</button>
+        <button id="tab-cal">달력</button>
+      </div>
+
+      <div id="upcoming" class="hide"></div>
+
+      <div id="calview">
       <div class="calbar">
-        <button id="mo-prev">‹ 이전</button>
+        <button class="nav" id="mo-prev" aria-label="이전 달">‹</button>
         <span class="month" id="mo-label"></span>
-        <button id="mo-next">다음 ›</button>
+        <button class="nav" id="mo-next" aria-label="다음 달">›</button>
+        <span class="spacer"></span>
         <button id="mo-now">이번 달</button>
       </div>
       <div class="grid">
@@ -228,6 +314,8 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         </div>
         <div id="weeks"></div>
       </div>
+      <!-- 좁은 화면에서는 고른 날의 상세가 달력 바로 아래에 열린다 -->
+      <div class="panel hide" id="day-inline" style="margin-top:10px"></div>
       <div class="chips" id="chips"></div>
       <div class="note-line hide" id="teacher-note">
         내 수업과 내가 적은 안 되는 날만 보입니다. 다른 선생님이 적은 안 되는 날은 보이지 않습니다.
@@ -246,12 +334,15 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         <span><i class="g-hard"></i>조율 어려움</span>
         <span><i class="g-unknown"></i>확인 필요</span>
       </div>
+      </div><!-- /#calview -->
     </div>
-    <div class="right">
+    <div class="right" id="side">
       <div class="panel" id="panel"></div>
     </div>
   </div>
 </section>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <!-- ══ 설정 ════════════════════════════════ -->
 <section id="view-setup" class="hide">
@@ -314,6 +405,16 @@ function fmt(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + p
 function today() { return fmt(new Date()); }
 function shortDate(s) { var p = s.split('-'); return Number(p[1]) + '/' + Number(p[2]); }
 
+// 저장했다는 말은 잠깐만 있으면 된다. 실패는 폼 안에 남아야 다시 눌러 볼 수 있다.
+var toastTimer = null;
+function toast(text) {
+  var t = $('toast');
+  t.textContent = text;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.remove('on'); }, 2000);
+}
+
 async function api(method, url, body) {
   var opt = { method: method, headers: {}, credentials: 'same-origin' };
   if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
@@ -342,8 +443,20 @@ var S = {
   holidays: [],           // 내장 공휴일 (lib/holidays.js → /api/room)
   schoolHolidays: [],     // 우리 학교만 쉬는 날 (설정)
   provisionalYears: [],   // 아직 확정 전인 해
-  confirmedYears: []      // 확정된 해
+  confirmedYears: [],     // 확정된 해
+  mobile: false,          // 좁은 화면인가
+  view: 'cal'             // 'cal' | 'list' (좁은 화면에서만 갈린다)
 };
+
+// 좁은 화면 판정은 CSS 와 같은 720px 로 맞춘다
+var mq = window.matchMedia('(max-width: 720px)');
+S.mobile = mq.matches;
+function onWidthChange() {
+  S.mobile = mq.matches;
+  if (S.role) renderCal();
+}
+if (mq.addEventListener) mq.addEventListener('change', onWidthChange);
+else if (mq.addListener) mq.addListener(onWidthChange);
 
 // 그날이 쉬는 날인가. 같은 날이면 **학교 휴업일 이름이 이긴다** —
 // 재량휴업일에 다른 이름을 붙였다면 그것이 우리 학교의 사실이다.
@@ -496,6 +609,7 @@ async function route() {
     show('cal'); await refresh(); return;
   }
   show('login');
+  $('login-code').focus();   // 들어오자마자 바로 칠 수 있게
   try {
     var r = await api('GET', '/api/room');
     $('login-room').textContent = r.name || '디지털새싹 일정판';
@@ -552,6 +666,8 @@ $('login-code').addEventListener('input', function () {
 async function loadMe() {
   var m = await api('GET', '/api/me');
   S.role = m.role; S.me = m.me; S.room = m.room;
+  // 첫 보기는 역할에 맞춘다 — 선생님은 '내 앞으로 무엇이 있나', 담당자는 '이번 달 전체'.
+  S.view = (m.role === 'master') ? 'cal' : 'list';
   return m;
 }
 async function logout() {
@@ -562,6 +678,14 @@ async function logout() {
 }
 $('cal-out').addEventListener('click', logout);
 $('setup-out').addEventListener('click', logout);
+$('tab-list').addEventListener('click', function () { S.view = 'list'; refresh(); });
+$('tab-cal').addEventListener('click', function () { S.view = 'cal'; refresh(); });
+// 좁은 화면에서 ⋯ 로 여닫는 메뉴. 바깥을 누르면 닫힌다.
+$('top-more').addEventListener('click', function (e) {
+  e.stopPropagation();
+  $('top-actions').classList.toggle('open');
+});
+document.addEventListener('click', function () { $('top-actions').classList.remove('open'); });
 $('go-setup').addEventListener('click', function () { location.hash = '#setup'; });
 $('back-cal').addEventListener('click', function () { location.hash = '#cal'; });
 
@@ -577,22 +701,59 @@ function moveMonth(step) {
   refresh();
 }
 
+// '다가오는 일정' 은 8주를 보므로 이번 달 하나로는 모자란다. 그럴 때만 석 달을 받아 잇는다.
+function monthsToLoad() {
+  if (!(S.mobile && S.view === 'list')) return [S.month];
+  var out = [];
+  var base = new Date();
+  for (var i = 0; i < 3; i++) {
+    var d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+    out.push(d.getFullYear() + '-' + pad(d.getMonth() + 1));
+  }
+  return out;
+}
+function mergeById(list) {
+  var seen = {}, out = [];
+  list.forEach(function (x) { if (!seen[x.id]) { seen[x.id] = true; out.push(x); } });
+  return out;
+}
+
 async function refresh() {
   try {
-    var d = await api('GET', '/api/data?month=' + S.month);
+    var months = monthsToLoad();
+    var packs = await Promise.all(months.map(function (m) { return api('GET', '/api/data?month=' + m); }));
+    var d = packs[0];
     S.role = d.role; S.me = d.me; S.room = d.room;
-    S.teachers = d.teachers; S.programs = d.programs; S.blocks = d.blocks;
+    S.teachers = d.teachers;
+    S.programs = mergeById(packs.reduce(function (a, p) { return a.concat(p.programs); }, []));
+    S.blocks = mergeById(packs.reduce(function (a, p) { return a.concat(p.blocks); }, []));
     S.schoolHolidays = (d.room && d.room.schoolHolidays) || [];
     renderCal();
   } catch (e) {
     if (e.status === 401) { S.role = null; location.hash = '#login'; route(); return; }
-    var p = $('panel');
+    var p = panelBox();
     p.innerHTML = '';
     p.appendChild(el('div', 'clash-box', '일정을 불러오지 못했어요: ' + e.message + ' 잠시 뒤 다시 열어 보시고, 그래도 안 되면 담당 선생님께 알려 주세요.'));
   }
 }
 
+// 상세를 어디에 그릴지 — 넓은 화면은 오른쪽 고정 패널, 좁은 화면은 달력 바로 아래.
+function panelBox() {
+  return (S.mobile && S.view === 'cal') ? $('day-inline') : $('panel');
+}
+
+function renderViews() {
+  var listMode = S.mobile && S.view === 'list';
+  $('upcoming').classList.toggle('hide', !listMode);
+  $('calview').classList.toggle('hide', listMode);
+  $('side').classList.toggle('hide', S.mobile && S.view === 'cal');
+  $('day-inline').classList.toggle('hide', !(S.mobile && S.view === 'cal'));
+  $('tab-list').classList.toggle('on', S.view === 'list');
+  $('tab-cal').classList.toggle('on', S.view === 'cal');
+}
+
 function renderCal() {
+  renderViews();
   $('cal-room').textContent = S.room.name || '디지털새싹 일정판';
   $('cal-me').textContent = (S.me.name || '') + (S.me.cls ? ' · ' + S.me.cls : '');
   $('go-setup').classList.toggle('hide', S.role !== 'master');
@@ -618,6 +779,69 @@ function renderCal() {
   }
   renderChips();
   renderPanel();
+  renderUpcoming();
+}
+
+// ── 카드 만들기 ──────────────────────────────────────
+// 달력 칸과 '다가오는 일정' 이 같은 카드를 쓴다. 두 벌을 만들면 한쪽만 고치게 된다.
+function programCardEl(pr) {
+  var parts = programCardParts(pr, S.role, nameOf, S.me.id);
+  var c = el('div', 'card');
+  if (S.role === 'master') {
+    var bg = colorOf(pr);
+    c.style.background = bg;
+    c.style.color = Palette.textOn(bg);   // 밝은 색 위에서는 글자를 진하게 바꾼다
+  } else if ((pr.teacherIds || []).indexOf(S.me.id) >= 0) {
+    c.style.background = TEACHER_CARD;
+    c.style.color = Palette.textOn(TEACHER_CARD);
+  } else {
+    c.classList.add('open');              // 내 것이 아닌 공개 수업: 흰 바탕
+  }
+  c.title = parts.text;
+
+  // 1행 — 시간(연하게) + 제목(진하게)
+  var r1 = el('div', 'c1');
+  r1.appendChild(el('span', 't', pr.start));
+  r1.appendChild(document.createTextNode(pr.title));
+  c.appendChild(r1);
+
+  // 2행 — 담당 이름. 선생님 화면의 '내 수업' 에는 붙이지 않는다.
+  var names = (S.role === 'master')
+    ? namesInOrder(pr).map(nameOf).join('·')
+    : ((pr.teacherIds || []).indexOf(S.me.id) >= 0 ? '' : (pr.teacherIds || []).map(nameOf).join('·'));
+  var co = cardTeachers(pr).slice(1);
+  var needRow2 = names || co.length > 0 || parts.marks.length > 0;
+  if (needRow2) {
+    var r2 = el('div', 'c2');
+    if (names) r2.appendChild(el('span', null, names));
+    co.slice(0, 3).forEach(function (id) {
+      var t = teacherOf(id);
+      var dot = el('span', 'co-dot');
+      dot.style.background = t ? t.color : '#8a8f85';
+      dot.title = nameOf(id);
+      r2.appendChild(dot);
+    });
+    if (co.length > 3) {
+      var more = el('span', 'mark co-more', '+' + (co.length - 3));
+      more.title = co.slice(3).map(nameOf).join(', ');
+      r2.appendChild(more);
+    }
+    parts.marks.forEach(function (m) {
+      r2.appendChild(el('span', m === '전체 공개' ? 'mark tag-all' : 'mark', m));
+    });
+    c.appendChild(r2);
+  }
+  if (programClashes(pr)) c.classList.add('clash');
+  return c;
+}
+
+function blockCardEl(bl) {
+  var label = (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + Slots.blockCardText(bl);
+  var c = el('div', 'card block');
+  c.title = label;
+  c.appendChild(el('div', 'c1', label));
+  if (blockClashes(bl)) c.classList.add('clash');
+  return c;
 }
 
 function dayCell(dateObj, monthNo) {
@@ -638,48 +862,37 @@ function dayCell(dateObj, monthNo) {
   if (hol) head.appendChild(el('span', 'hname', hol.name));
   cell.appendChild(head);
 
-  S.programs.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (pr) {
-    var parts = programCardParts(pr, S.role, nameOf, S.me.id);
-    var c = el('div', 'card');
-    if (S.role === 'master') {
-      c.style.background = colorOf(pr);          // 담당자 화면: 담당 선생님 신분 색
-    } else if ((pr.teacherIds || []).indexOf(S.me.id) >= 0) {
-      c.style.background = TEACHER_CARD;         // 내 수업: 범례의 초록 하나
-    } else {
-      c.classList.add('open');                   // 내 것이 아닌 전체 공개 수업: 흰 바탕
-    }
-    c.title = parts.text;                       // 잘린 제목은 마우스로 확인
-    c.appendChild(el('span', 'card-text', parts.text));
-    // 담당이 2명 이상이면 나머지 사람의 색을 점으로 남긴다. 점이 많아지면 칸을 밀어내므로
-    // 세 개까지만 찍고 나머지는 '+n' 으로 줄인다.
-    var co = cardTeachers(pr).slice(1);
-    co.slice(0, 3).forEach(function (id) {
-      var t = teacherOf(id);
-      var dot = el('span', 'co-dot');
-      dot.style.background = t ? t.color : '#8a8f85';
-      dot.title = nameOf(id);
-      c.appendChild(dot);
-    });
-    if (co.length > 3) {
-      var more = el('span', 'mark co-more', '+' + (co.length - 3));
-      more.title = co.slice(3).map(nameOf).join(', ');
-      c.appendChild(more);
-    }
-    parts.marks.forEach(function (m) {
-      c.appendChild(el('span', m === '전체 공개' ? 'mark tag-all' : 'mark', m));
-    });
-    if (programClashes(pr)) c.classList.add('clash');
-    cell.appendChild(c);
-  });
+  var prs = S.programs.filter(function (x) { return x.date === ds && visible(x); });
+  var bls = S.blocks.filter(function (x) { return x.date === ds && visible(x); });
 
-  S.blocks.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (bl) {
-    var label = (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + Slots.blockCardText(bl);
-    var c = el('div', 'card block');
-    c.title = label;
-    c.appendChild(el('span', 'card-text', label));
-    if (blockClashes(bl)) c.classList.add('clash');
-    cell.appendChild(c);
-  });
+  if (S.mobile) {
+    // 좁은 화면에서는 칸에 글자를 넣지 않는다. 색 점만 찍고 자세한 것은 아래에서 본다.
+    var dots = el('div', 'dots');
+    var shown = 0;
+    prs.forEach(function (pr) {
+      if (shown >= 4) return;
+      shown++;
+      var d = el('span', 'pdot');
+      d.style.background = S.role === 'master' ? colorOf(pr) : TEACHER_CARD;
+      d.title = pr.start + ' ' + pr.title;
+      if (programClashes(pr)) d.classList.add('clash');
+      dots.appendChild(d);
+    });
+    bls.forEach(function (bl) {
+      if (shown >= 4) return;
+      shown++;
+      var d = el('span', 'pdot block');
+      d.title = Slots.blockCardText(bl);
+      if (blockClashes(bl)) d.classList.add('clash');
+      dots.appendChild(d);
+    });
+    var rest = prs.length + bls.length - shown;
+    if (rest > 0) dots.appendChild(el('span', 'more', '+' + rest));
+    if (shown > 0) cell.appendChild(dots);
+  } else {
+    prs.forEach(function (pr) { cell.appendChild(programCardEl(pr)); });
+    bls.forEach(function (bl) { cell.appendChild(blockCardEl(bl)); });
+  }
 
   // 마스터에게만: 평일 칸 우하단에 그날 '안 되는 날' 을 적지 않은 선생님 수.
   // 수업이 있어도 가능으로 센다 — 한 사람이 하루에 두 차시를 맡을 수 있기 때문이다.
@@ -690,11 +903,20 @@ function dayCell(dateObj, monthNo) {
     if (pool.length > 0) {
       // 오전만·오후만 안 되는 분은 '가능' 으로 센다. 종일이거나 오전+오후 둘 다면 불가.
       var free = pool.filter(function (t) { return statusOf(t.id, ds).free; }).length;
-      cell.appendChild(el('div', 'free', '가능 ' + free + '/' + pool.length));
+      // 휴일 이름이 이미 붙어 있으면 그쪽이 먼저다(둘 다 넣으면 머리가 두 줄이 된다)
+      if (!hol) head.appendChild(el('span', 'freepill', '가능 ' + free + '/' + pool.length));
     }
   }
 
-  cell.addEventListener('click', function () { S.pick = ds; renderCal(); });
+  // 마우스뿐 아니라 키보드로도 날짜를 고를 수 있어야 한다
+  cell.tabIndex = 0;
+  cell.setAttribute('role', 'button');
+  cell.setAttribute('aria-label', ds + (hol ? ' ' + hol.name : ''));
+  function choose() { S.pick = ds; renderCal(); }
+  cell.addEventListener('click', choose);
+  cell.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); }
+  });
   return cell;
 }
 
@@ -742,10 +964,56 @@ function renderChips() {
   if (list.length) box.appendChild(el('span', 'clash-sum', '겹침 ' + list.length + '건: ' + list.join(', ')));
 }
 
+// ── 다가오는 일정(좁은 화면 기본 보기) ────────────────
+// 달력은 한눈에 넓게 보는 도구다. 폰에서는 그 칸이 너무 작아 글자가 들어가지 않으므로
+// '오늘부터 앞으로' 를 목록으로 보여 준다. 날짜 머리를 누르면 그날 할 일을 바로 연다.
+var UPCOMING_DAYS = 56;   // 8주
+function renderUpcoming() {
+  var box = $('upcoming');
+  if (!S.mobile || S.view !== 'list') { box.innerHTML = ''; return; }
+  box.innerHTML = '';
+
+  var from = today();
+  var to = fmt(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() + UPCOMING_DAYS));
+  var days = {};
+  function put(ds, kind, item) {
+    if (ds < from || ds > to) return;
+    (days[ds] = days[ds] || { programs: [], blocks: [] })[kind].push(item);
+  }
+  S.programs.forEach(function (p) { if (visible(p)) put(p.date, 'programs', p); });
+  S.blocks.forEach(function (b) { if (visible(b)) put(b.date, 'blocks', b); });
+
+  var keys = Object.keys(days).sort();
+  if (keys.length === 0) {
+    box.appendChild(el('div', 'up-empty', '앞으로 8주 안에 적힌 일정이 없어요.'));
+    return;
+  }
+  var DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  keys.forEach(function (ds) {
+    var wrap = el('div', 'up-day');
+    var d = new Date(ds + 'T12:00:00');
+    var hol = holidayOf(ds);
+    var head = el('button', 'up-head');
+    head.appendChild(el('span', 'up-date', (d.getMonth() + 1) + '월 ' + d.getDate() + '일'));
+    head.appendChild(el('span', 'up-dow', DOW[d.getDay()] + '요일'));
+    if (hol) head.appendChild(el('span', 'up-hol', hol.name));
+    head.addEventListener('click', function () {
+      S.pick = ds;
+      S.view = 'cal';          // 그날 할 일은 상세 화면에서 한다
+      S.month = ds.slice(0, 7);
+      refresh();
+    });
+    wrap.appendChild(head);
+    days[ds].programs.forEach(function (p) { wrap.appendChild(programCardEl(p)); });
+    days[ds].blocks.forEach(function (b) { wrap.appendChild(blockCardEl(b)); });
+    box.appendChild(wrap);
+  });
+}
+
 // ── 오른쪽 날짜 상세 ─────────────────────────────────
 function renderPanel() {
   if (S.formOpen) return;      // 폼이 열려 있으면 그대로 둔다
-  var box = $('panel');
+  var box = panelBox();
   box.innerHTML = '';
   var ds = S.pick;
   var cl = clashesOn(ds);
@@ -805,9 +1073,9 @@ function renderPanel() {
       r.appendChild(el('div', 'who', '이날 나는 안 되지만 수업은 담당 선생님이 진행합니다.'));
     }
     if (S.role === 'master') {
-      var edit = el('button', 'linkish', '고치기');
+      var edit = el('button', 'btn-sm', '고치기');
       edit.addEventListener('click', function () { openProgramForm(pr); });
-      var acts = el('div', 'acts'); acts.appendChild(edit);
+      var acts = el('div', 'rowacts'); acts.appendChild(edit);
       r.appendChild(acts);
     }
     box.appendChild(r);
@@ -818,14 +1086,14 @@ function renderPanel() {
     r.appendChild(el('div', 'ttl', Slots.memoOf(bl) || Slots.EMPTY_MEMO));
     r.appendChild(el('div', 'who', (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + Slots.slotLabel(bl)));
     if (S.role === 'master' || bl.teacherId === S.me.id) {
-      var acts2 = el('div', 'acts');
-      var fix = el('button', 'linkish', '고치기');
+      var acts2 = el('div', 'rowacts');
+      var fix = el('button', 'btn-sm', '고치기');
       fix.addEventListener('click', function () { openBlockForm(bl); });
       acts2.appendChild(fix);
-      var del = el('button', 'linkish', '지우기');
+      var del = el('button', 'btn-sm btn-danger', '지우기');
       del.addEventListener('click', async function () {
         if (!window.confirm('이 안 되는 날을 지울까요?')) return;
-        try { await api('DELETE', '/api/blocks/' + bl.id); await refresh(); }
+        try { await api('DELETE', '/api/blocks/' + bl.id); await refresh(); toast('지웠어요'); }
         catch (e) { alert('지우지 못했어요: ' + e.message); }
       });
       acts2.appendChild(del);
@@ -890,7 +1158,7 @@ function renderPanel() {
 function openProgramForm(pr) {
   if (S.role !== 'master') return;   // 담당자 시점 폼이다. 다른 길로도 열리지 않게 여기서 막는다.
   S.formOpen = true; S.editing = pr;
-  var box = $('panel');
+  var box = panelBox();
   box.innerHTML = '';
   box.appendChild(el('h2', null, pr ? '수업 고치기' : '수업 배정'));
 
@@ -1028,6 +1296,7 @@ function openProgramForm(pr) {
       else { body.dates = ds; await api('POST', '/api/programs', body); }
       closeForm();
       await refresh();
+      toast('저장했어요');
     } catch (e) {
       save.disabled = false;
       msg.className = 'formmsg bad';
@@ -1058,7 +1327,7 @@ function openProgramForm(pr) {
 // ── 안 되는 날 폼 ────────────────────────────────────
 function openBlockForm(bl) {
   S.formOpen = true;
-  var box = $('panel');
+  var box = panelBox();
   box.innerHTML = '';
   box.appendChild(el('h2', null, bl ? '안 되는 날 고치기' : '이날 안 돼요'));
   var f = el('div', 'form');
@@ -1103,6 +1372,7 @@ function openBlockForm(bl) {
       else await api('POST', '/api/blocks', { date: d.value, slot: slot, memo: memo.value });
       closeForm();
       await refresh();
+      toast('저장했어요');
     } catch (e) {
       save.disabled = false;
       msg.className = 'formmsg bad';
@@ -1375,10 +1645,12 @@ $('setup-save').addEventListener('click', async function () {
     holidayRows = ((r.room && r.room.schoolHolidays) || []).map(function (h) { return Object.assign({}, h); });
     drawTeacherRows(r.duplicateIds || []);
     drawHolidayRows();
+    // 성공은 토스트로 잠깐. 다만 손볼 것이 남았으면 그 말은 화면에 남겨 둔다.
+    toast('저장했어요');
     msg.className = 'formmsg good';
     msg.textContent = (r.duplicateIds && r.duplicateIds.length)
-      ? '저장했어요. CODE 가 겹치는 분이 있으니 표시된 줄을 6자리로 바꿔 주세요.'
-      : '저장했어요.';
+      ? '같은 CODE가 겹치는 분이 있으니 표시된 줄을 6자리로 바꿔 주세요.'
+      : '';
   } catch (e) {
     // 어느 줄이 문제인지 서버가 짚어 주면 그 줄 아래에 빨간 글씨로 붙인다.
     // 이때는 성공 문구를 절대 띄우지 않는다 — 저장되지 않았기 때문이다.

@@ -41,5 +41,36 @@
     return i >= 0 ? NAMES[i] : '';
   }
 
-  return { COLORS: COLORS, NAMES: NAMES, pick: pick, nameOf: nameOf };
+  // ── 글자 대비 ────────────────────────────────────────
+  // 카드 글자를 흰색으로 고정해 두면 밝은 색 위에서 읽기 어려워진다.
+  // WCAG 대비를 재서 흰 글자가 AA(4.5:1)에 못 미치면 진한 글자로 바꾼다.
+  var DARK = '#111111';
+  var AA = 4.5;
+
+  function lum(hex) {
+    var h = String(hex).replace('#', '');
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var c = [0, 2, 4].map(function (i) {
+      var v = parseInt(h.substr(i, 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  function contrast(a, b) {
+    var la = lum(a), lb = lum(b);
+    var hi = Math.max(la, lb), lo = Math.min(la, lb);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  // 배경색 위에 얹을 글자색. 흰 글자가 AA 를 넘으면 흰색, 아니면 진한 색.
+  // 둘 다 못 미치면 그나마 대비가 큰 쪽을 준다.
+  function textOn(bg) {
+    var w = contrast(bg, '#ffffff');
+    if (w >= AA) return '#ffffff';
+    return contrast(bg, DARK) >= w ? DARK : '#ffffff';
+  }
+
+  return {
+    COLORS: COLORS, NAMES: NAMES, pick: pick, nameOf: nameOf,
+    DARK: DARK, AA: AA, lum: lum, contrast: contrast, textOn: textOn
+  };
 });
