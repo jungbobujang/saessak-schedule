@@ -117,6 +117,42 @@ function monthRange(month) {
   return { from: f(first), to: f(last) };
 }
 
+// 한 사람의 하루에는 '안 되는 날' 이 한 장이어야 한다. 옛 자료에는 여러 장이 있을 수
+// 있는데, **파일은 건드리지 않고 읽는 응답에서만 합쳐 보여 준다.**
+// 오전 + 오후 = 종일이고, 메모는 '/' 로 잇는다. 지우는 것이 아니라 겹쳐 읽는 것이다.
+var mergeLogged = false;
+function mergeBlocks(list) {
+  var byKey = {};
+  var order = [];
+  var merged = 0;
+  list.forEach(function (b) {
+    var key = b.date + '|' + b.teacherId;
+    if (!byKey[key]) { byKey[key] = [b]; order.push(key); return; }
+    byKey[key].push(b);
+    merged++;
+  });
+  if (merged > 0 && !mergeLogged) {
+    mergeLogged = true;
+    console.log('[데이터] 같은 날 중복 안 되는 날 ' + merged + '건을 합쳐 표시합니다.');
+  }
+  return order.map(function (key) {
+    var group = byKey[key];
+    if (group.length === 1) return group[0];
+    var slots = {};
+    var memos = [];
+    group.forEach(function (b) {
+      slots[Slots.slotOf(b)] = true;
+      var m = Slots.memoOf(b);
+      if (m && memos.indexOf(m) < 0) memos.push(m);
+    });
+    var slot = (slots.all || (slots.am && slots.pm)) ? 'all' : (slots.am ? 'am' : 'pm');
+    return {
+      id: group[0].id, date: group[0].date, teacherId: group[0].teacherId,
+      slot: slot, memo: memos.join('/'), updatedAt: group[0].updatedAt, mergedFrom: group.length
+    };
+  });
+}
+
 // 요청자 시점 필터. 선생님에게는 남의 '안 되는 날'을 아예 담지 않는다.
 function filterFor(session, d, range) {
   var inRange = function (dt) { return dt >= range.from && dt <= range.to; };
@@ -129,7 +165,7 @@ function filterFor(session, d, range) {
     });
     blocks = blocks.filter(function (b) { return b.teacherId === id; });
   }
-  return { programs: programs, blocks: blocks };
+  return { programs: programs, blocks: mergeBlocks(blocks) };
 }
 
 // 선생님에게 나가는 명단에는 code 도 grade 도 넣지 않는다.
@@ -172,7 +208,11 @@ app.post('/api/login', function (req, res) {
     return res.json({ ok: true, role: 'teacher', name: hits[0].name });
   }
   if (hits.length > 1) {
-    return res.json({ ambiguous: true, error: '같은 코드를 쓰는 분이 있어요. 앞 2자리를 더 입력해 주세요.' });
+    // 6자리까지 넣었는데도 갈리지 않으면 사람이 더 할 수 있는 일이 없다. 담당자에게 넘긴다.
+    if (code.length >= 6) {
+      return res.json({ ambiguous: true, error: '담당 선생님께 CODE 정리를 요청해 주세요.' });
+    }
+    return res.json({ ambiguous: true, error: '같은 CODE의 선생님이 두 분 있어요. 앞 2자리를 더 넣어 6자리로 시도해 주세요.' });
   }
   return res.status(401).json({ error: '등록된 코드가 아니에요. 담당 선생님께 확인해 주세요.' });
 });
@@ -301,17 +341,54 @@ app.post('/api/blocks', requireAuth, function (req, res) {
   if (!d.room.teachers.some(function (t) { return t.id === target; })) {
     return res.status(400).json({ error: '명단에 없는 선생님이에요.' });
   }
+  // 한 사람의 하루에는 한 장이다. 이미 적어 둔 것이 있으면 새로 쌓지 않고 고쳐 쓴다 —
+  // '오전' 이라 적었다가 '종일' 로 바꾸는 것은 새 기록이 아니라 같은 말의 정정이다.
+  var memo = clean(b.memo, 100);   // 빈 값이어도 된다. 이유를 요구하지 않는다.
+  var mine = d.blocks.filter(function (x) { return x.date === b.date && x.teacherId === target; });
+  if (mine.length > 0) {
+    mine.forEach(function (x, i) { if (i > 0) x._drop = true; });   // 옛 중복은 이참에 하나로
+    var keep = mine[0];
+    keep.slot = slot;
+    keep.memo = memo;
+    keep.updatedAt = nowIso();
+    d.blocks = d.blocks.filter(function (x) { return !x._drop; });
+    store.save(d);
+    return res.json({ ok: true, replaced: true, block: keep });
+  }
+
   var made = {
     id: store.genId('b'),
     date: b.date,
     teacherId: target,
     slot: slot,
-    memo: clean(b.memo, 100),   // 빈 값이어도 된다. 이유를 요구하지 않는다.
+    memo: memo,
     updatedAt: nowIso()
   };
   d.blocks.push(made);
   store.save(d);
-  res.json({ ok: true, block: made });
+  res.json({ ok: true, replaced: false, block: made });
+});
+
+// 적어 둔 것을 고친다. 지웠다 다시 적게 하면 그 사이에 담당자가 본 화면이 어긋난다.
+app.put('/api/blocks/:id', requireAuth, function (req, res) {
+  var b = req.body || {};
+  var d = store.load();
+  var target = d.blocks.filter(function (x) { return x.id === req.params.id; })[0];
+  if (!target) return res.status(404).json({ error: '그 기록을 찾지 못했어요.' });
+  if (req.session.role !== 'master' && target.teacherId !== req.session.teacherId) {
+    return res.status(403).json({ error: '내가 적은 것만 고칠 수 있어요.' });
+  }
+  if (b.slot !== undefined) {
+    if (!Slots.isSlot(b.slot)) {
+      return res.status(400).json({ error: '시간대는 종일·오전·오후 중에서 골라 주세요.' });
+    }
+    target.slot = b.slot;
+  }
+  if (b.memo !== undefined) target.memo = clean(b.memo, 100);
+  delete target.title;          // 옛 형식이 남아 있었다면 여기서 정리된다
+  target.updatedAt = nowIso();
+  store.save(d);
+  res.json({ ok: true, block: target });
 });
 
 app.delete('/api/blocks/:id', requireAuth, function (req, res) {
@@ -349,7 +426,17 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
       if (badDay < 0 && !isDate(h && h.date)) badDay = i;
     });
     if (badDay >= 0) {
-      return res.status(400).json({ error: '휴업일 날짜를 확인해 주세요. (예: 2026-10-06)', holidayRow: badDay });
+      return res.status(400).json({ error: '휴업일 날짜를 확인해 주세요. (예: 2026-10-06)', row: badDay, holidayRow: badDay });
+    }
+    // 같은 날짜가 두 번이면 나중 것이 앞 것을 조용히 덮는다 — 그 전에 알려 준다.
+    var seenDay = {};
+    var dupDay = -1;
+    b.room.schoolHolidays.forEach(function (h, i) {
+      if (dupDay < 0 && seenDay[h.date]) dupDay = i;
+      seenDay[h.date] = true;
+    });
+    if (dupDay >= 0) {
+      return res.status(400).json({ error: '같은 날짜가 두 번 있어요.', row: dupDay, holidayRow: dupDay });
     }
     d.room.schoolHolidays = b.room.schoolHolidays.map(function (h) {
       return { date: h.date, name: clean(h.name, 30) };
@@ -364,7 +451,9 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
       if (bad >= 0) return;
       if (t && t.id === 'master') return;          // 담당자 코드는 배포 설정에서 정한다
       var raw = String((t && t.code) || '').trim();
-      if (!/^\d{4}$|^\d{6}$/.test(raw)) bad = i;
+      // 빈 칸은 허용한다 — 이름만 먼저 적어 두고 CODE 는 나중에 받을 수 있다.
+      // (빈 CODE 로는 로그인 매칭에 걸리지 않는다)
+      if (raw !== '' && !/^\d{4}$|^\d{6}$/.test(raw)) bad = i;
     });
     if (bad >= 0) {
       return res.status(400).json({ error: '뒷자리는 4자리 또는 6자리 숫자로 입력해 주세요.', row: bad });

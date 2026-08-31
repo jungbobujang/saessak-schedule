@@ -51,11 +51,14 @@ var data = store.ensureShape({
     { id: 'p_8', date: ymd(21), start: '09:00', end: '12:00', title: '디지털새싹 7차시', teacherIds: [t1], visibility: 'assigned', memo: '', updatedAt: now },
     { id: 'p_9', date: ymd(23), start: '13:00', end: '15:00', title: '디지털새싹 8차시', teacherIds: [t2, t3], visibility: 'assigned', memo: '두 반 합반', updatedAt: now }
   ],
+  // 종일 2 · 오전 1 · 오후 1. 겹침 2건 중 하나는 반나절만 부딪히는 '부분 겹침' 이다.
   blocks: [
-    { id: 'b_1', date: ymd(9), teacherId: t1, title: '연수', updatedAt: now },        // 겹침 ①
-    { id: 'b_2', date: ymd(14), teacherId: t2, title: '출장', updatedAt: now },       // 겹침 ②
-    { id: 'b_3', date: ymd(6), teacherId: t3, title: '안 돼요', updatedAt: now },
-    { id: 'b_4', date: ymd(17), teacherId: t1, title: '학년 행사', updatedAt: now }
+    // 겹침 ① 종일 — p_4(09:00~12:00)와 통째로 부딪힌다
+    { id: 'b_1', date: ymd(9), teacherId: t1, slot: 'all', memo: '연수', updatedAt: now },
+    // 겹침 ② 오후만 — p_6(13:00~16:00)이 오후라 부딪힌다(오전 수업이었다면 안 부딪힌다)
+    { id: 'b_2', date: ymd(14), teacherId: t2, slot: 'pm', memo: '출장', updatedAt: now },
+    { id: 'b_3', date: ymd(6), teacherId: t3, slot: 'all', memo: '', updatedAt: now },
+    { id: 'b_4', date: ymd(17), teacherId: t1, slot: 'am', memo: '학년 행사', updatedAt: now }
   ]
 });
 
