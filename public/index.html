@@ -66,8 +66,15 @@ button:hover{background:#eef1ea}
 .day.pick{outline:2px solid var(--green);outline-offset:-2px}
 .day.clickable{cursor:pointer}
 .day.clickable:hover{background:#f4f7f1}
-.dnum{font-size:13px;font-weight:600}
+.dhead{display:flex;align-items:baseline;gap:4px;min-width:0}
+.dnum{font-size:13px;font-weight:600;flex:none}
 .today .dnum{background:var(--green);color:#fff;border-radius:999px;padding:1px 7px}
+/* 공휴일·학교 휴업일 */
+.day.holiday{background:#fdf3f5}
+.day.holiday .dnum{color:var(--red)}
+.day.holiday.today .dnum{color:#fff}
+.hname{font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.lg-h{background:#fdf3f5;border:1px solid #f0c6c6}
 .free{position:absolute;right:5px;bottom:3px;font-size:11px;color:var(--dim)}
 
 /* 카드는 열 너비를 넘지 않는다. 전체 제목은 title 속성(마우스)과 상세 패널에서 본다. */
@@ -152,6 +159,9 @@ button:hover{background:#eef1ea}
 .slotpick .slot-btn.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
 .slotpick .slot-btn.on:hover{background:#276749}
 .checks .when{color:var(--dim);font-size:12px;margin-left:4px}
+/* 쉬는 날에 배정하려 할 때 — 막지 않고 확인만 구한다 */
+.holwarn{margin-top:10px;padding:9px;border:1px solid #e6d08a;background:#fdf8e6;color:#7a5c12;
+  border-radius:9px;font-size:13px}
 .formmsg{margin-top:10px;font-size:13px;min-height:18px}
 .formmsg.bad{color:var(--red)}
 .formmsg.good{color:var(--green)}
@@ -223,6 +233,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         <span><i class="lg-p"></i>디지털새싹 수업</span>
         <span><i class="lg-b"></i>안 되는 날(개인)</span>
         <span><i class="lg-c"></i>겹침</span>
+        <span><i class="lg-h"></i>휴일</span>
         <span class="ver" id="ver"></span>
       </div>
       <div class="legend hide" id="legend-grade">
@@ -257,6 +268,17 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
           <thead><tr><th style="width:22%">이름</th><th style="width:12%">반</th><th style="width:20%">CODE(4자리, 겹치면 6자리)</th><th style="width:10%">색</th><th style="width:22%">조율 등급</th><th></th></tr></thead>
           <tbody id="tea-body"></tbody>
         </table>
+        <h2 style="margin-top:22px">학교 휴업일</h2>
+        <p class="note-line" style="margin:0 0 8px">재량휴업일·방학 등 우리 학교만 쉬는 날. 공휴일은 자동으로 표시됩니다.</p>
+        <table>
+          <thead><tr><th style="width:34%">날짜</th><th>이름</th><th style="width:14%"></th></tr></thead>
+          <tbody id="hol-body"></tbody>
+        </table>
+        <div class="setup-acts">
+          <button id="hol-add">+ 휴업일 추가</button>
+        </div>
+        <p class="note-line" id="hol-note" style="margin:8px 0 0"></p>
+
         <div class="setup-acts">
           <button id="tea-add">+ 선생님 추가</button>
           <button class="btn-main" id="setup-save">저장</button>
@@ -313,8 +335,22 @@ var S = {
   hidden: {},             // 칩으로 끈 선생님 id
   formOpen: false,        // 폼이 열려 있으면 폴링을 쉰다(치던 값이 날아가지 않게)
   editing: null,          // 수정 중인 수업
-  version: ''             // 서버가 알려 주는 판 번호
+  version: '',            // 서버가 알려 주는 판 번호
+  holidays: [],           // 내장 공휴일 (lib/holidays.js → /api/room)
+  schoolHolidays: [],     // 우리 학교만 쉬는 날 (설정)
+  provisionalYears: [],   // 아직 확정 전인 해
+  confirmedYears: []      // 확정된 해
 };
+
+// 그날이 쉬는 날인가. 같은 날이면 **학교 휴업일 이름이 이긴다** —
+// 재량휴업일에 다른 이름을 붙였다면 그것이 우리 학교의 사실이다.
+function findHoliday(ds, builtins, school) {
+  var s = (school || []).filter(function (h) { return h && h.date === ds; })[0];
+  if (s) return { date: ds, name: (s.name || '').trim() || '학교 휴업일', school: true };
+  var b = (builtins || []).filter(function (h) { return h && h.date === ds; })[0];
+  return b ? { date: ds, name: b.name, school: false } : null;
+}
+function holidayOf(ds) { return findHoliday(ds, S.holidays, S.schoolHolidays); }
 S.month = today().slice(0, 7);
 
 // 조율 등급 — 담당자 화면에서만 쓴다. 선생님 응답에는 grade 가 아예 없다.
@@ -460,11 +496,18 @@ async function route() {
   try {
     var r = await api('GET', '/api/room');
     $('login-room').textContent = r.name || '디지털새싹 일정판';
-    setVersion(r.version);
+    takeRoom(r);
   } catch (e) {}
 }
 
 // 판 번호는 서버가 package.json 에서 읽어 준다. 화면은 받아 적기만 한다.
+function takeRoom(r) {
+  if (!r) return;
+  setVersion(r.version);
+  if (Array.isArray(r.holidays)) S.holidays = r.holidays;
+  if (Array.isArray(r.provisionalYears)) S.provisionalYears = r.provisionalYears;
+  if (Array.isArray(r.confirmedYears)) S.confirmedYears = r.confirmedYears;
+}
 function setVersion(v) {
   if (v) S.version = v;
   var text = S.version ? 'v' + S.version : '';
@@ -536,6 +579,7 @@ async function refresh() {
     var d = await api('GET', '/api/data?month=' + S.month);
     S.role = d.role; S.me = d.me; S.room = d.room;
     S.teachers = d.teachers; S.programs = d.programs; S.blocks = d.blocks;
+    S.schoolHolidays = (d.room && d.room.schoolHolidays) || [];
     renderCal();
   } catch (e) {
     if (e.status === 401) { S.role = null; location.hash = '#login'; route(); return; }
@@ -582,7 +626,14 @@ function dayCell(dateObj, monthNo) {
   if (dow === 6) cell.classList.add('sat');
   if (ds === today()) cell.classList.add('today');
   if (ds === S.pick) cell.classList.add('pick');
-  cell.appendChild(el('div', 'dnum', String(dateObj.getDate())));
+
+  var hol = holidayOf(ds);
+  if (hol) cell.classList.add('holiday');
+  var head = el('div', 'dhead');
+  head.appendChild(el('span', 'dnum', String(dateObj.getDate())));
+  // 주말과 겹치면 색은 이미 붙어 있으니 이름만 더한다
+  if (hol) head.appendChild(el('span', 'hname', hol.name));
+  cell.appendChild(head);
 
   S.programs.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (pr) {
     var parts = programCardParts(pr, S.role, nameOf);
@@ -624,7 +675,8 @@ function dayCell(dateObj, monthNo) {
   // 마스터에게만: 평일 칸 우하단에 그날 '안 되는 날' 을 적지 않은 선생님 수.
   // 수업이 있어도 가능으로 센다 — 한 사람이 하루에 두 차시를 맡을 수 있기 때문이다.
   // 등록된 선생님이 0명이면 '가능 0/0' 같은 빈 숫자를 그리지 않는다.
-  if (S.role === 'master' && dow !== 0 && dow !== 6) {
+  // 쉬는 날에는 세지 않는다 — 그날 누가 되고 안 되고를 따질 일이 없다
+  if (S.role === 'master' && dow !== 0 && dow !== 6 && !hol) {
     var pool = realTeachers();
     if (pool.length > 0) {
       // 오전만·오후만 안 되는 분은 '가능' 으로 센다. 종일이거나 오전+오후 둘 다면 불가.
@@ -689,7 +741,8 @@ function renderPanel() {
   var ds = S.pick;
   var cl = clashesOn(ds);
 
-  box.appendChild(el('h2', null, shortDate(ds).replace('/', '월 ') + '일'));
+  var hol = holidayOf(ds);
+  box.appendChild(el('h2', null, shortDate(ds).replace('/', '월 ') + '일' + (hol ? ' · ' + hol.name : '')));
 
   if (cl.length) {
     var txt;
@@ -767,7 +820,11 @@ function renderPanel() {
     box.appendChild(r);
   });
 
-  if (S.role === 'master') {
+  if (S.role === 'master' && hol) {
+    // 쉬는 날에는 가능 인원을 따지지 않는다
+    box.appendChild(el('h2', null, '이날 가능한 선생님'));
+    box.appendChild(el('div', 'empty', '휴일 — ' + hol.name));
+  } else if (S.role === 'master') {
     box.appendChild(el('h2', null, '이날 가능한 선생님'));
     var pool = realTeachers();
     if (pool.length === 0) {
@@ -837,7 +894,7 @@ function openProgramForm(pr) {
     line.appendChild(d);
     if (dates.children.length > 0) {
       var x = el('button', null, '✕');
-      x.addEventListener('click', function () { line.remove(); });
+      x.addEventListener('click', function () { line.remove(); refreshWhen(); });
       line.appendChild(x);
     }
     dates.appendChild(line);
@@ -845,9 +902,12 @@ function openProgramForm(pr) {
   addDateLine(pr ? pr.date : S.pick);
   if (!pr) {
     var more = el('button', 'linkish', '+ 날짜 추가');
-    more.addEventListener('click', function () { addDateLine(S.pick); });
+    more.addEventListener('click', function () { addDateLine(S.pick); refreshWhen(); });
     f.appendChild(more);
   }
+
+  var holWarn = el('div', 'holwarn hide');
+  f.appendChild(holWarn);
 
   f.appendChild(el('label', null, '시간'));
   var two = el('div', 'two');
@@ -881,13 +941,29 @@ function openProgramForm(pr) {
   });
   f.appendChild(checks);
 
-  // 그 날짜에 이미 안 된다고 적어 둔 분을 이름 옆에 회색으로 알려 준다
+  // 그 날짜에 이미 안 된다고 적어 둔 분을 이름 옆에 회색으로 알려 준다.
+  // 고른 날이 쉬는 날이면 노란 상자로 확인만 구한다 — 막지는 않는다.
   function refreshWhen() {
     var first = dates.querySelector('input');
     var ds = first && first.value;
     whenSpans.forEach(function (x) {
       x.node.textContent = ds ? statusOf(x.id, ds).formLabel : '';
     });
+
+    var hits = [].slice.call(dates.querySelectorAll('input'))
+      .map(function (i) { return i.value; })
+      .filter(Boolean)
+      .map(function (v) { return holidayOf(v); })
+      .filter(Boolean);
+    if (hits.length === 0) {
+      holWarn.classList.add('hide');
+      holWarn.textContent = '';
+    } else {
+      holWarn.classList.remove('hide');
+      holWarn.textContent = hits.map(function (h) {
+        return shortDate(h.date) + '은 ' + h.name + '입니다.';
+      }).join(' ') + ' 그래도 배정할까요?';
+    }
   }
   dates.addEventListener('change', refreshWhen);
   refreshWhen();
@@ -1026,12 +1102,59 @@ function closeForm() { S.formOpen = false; S.editing = null; }
 
 // ── 설정 화면 ────────────────────────────────────────
 var setupRows = [];
+var holidayRows = [];
+
+// 학교 휴업일 표 — 날짜와 이름뿐이다. 저장은 선생님 명단과 같은 [저장] 하나로 함께 간다.
+function drawHolidayRows(errRow, errMsg) {
+  var body = $('hol-body');
+  body.innerHTML = '';
+  if (holidayRows.length === 0) {
+    var tr0 = el('tr');
+    var td0 = el('td'); td0.colSpan = 3;
+    td0.appendChild(el('span', 'who', '아직 없습니다. 재량휴업일이 정해지면 여기에 적어 주세요.'));
+    tr0.appendChild(td0);
+    body.appendChild(tr0);
+    return;
+  }
+  holidayRows.forEach(function (h, idx) {
+    var tr = el('tr');
+
+    var td1 = el('td');
+    var d = el('input'); d.type = 'date'; d.value = h.date || '';
+    d.addEventListener('input', function () { h.date = d.value; });
+    td1.appendChild(d);
+    if (errRow === idx && errMsg) td1.appendChild(el('div', 'warn-cell', errMsg));
+    tr.appendChild(td1);
+
+    var td2 = el('td');
+    var n = el('input'); n.type = 'text'; n.value = h.name || '';
+    n.placeholder = '재량휴업일';
+    n.addEventListener('input', function () { h.name = n.value; });
+    td2.appendChild(n);
+    tr.appendChild(td2);
+
+    var td3 = el('td');
+    var x = el('button', 'btn-danger', '삭제');
+    x.addEventListener('click', function () { holidayRows.splice(idx, 1); drawHolidayRows(); });
+    td3.appendChild(x);
+    tr.appendChild(td3);
+
+    body.appendChild(tr);
+  });
+}
+
 async function renderSetup() {
   try {
     var s = await api('GET', '/api/settings');
     $('room-name').value = s.room.name;
     setupRows = s.teachers.map(function (t) { return Object.assign({}, t); });
+    holidayRows = ((s.room && s.room.schoolHolidays) || []).map(function (h) { return Object.assign({}, h); });
     drawTeacherRows([]);
+    drawHolidayRows();
+    $('hol-note').textContent = '공휴일 자료: ' +
+      (S.provisionalYears.length
+        ? (S.confirmedYears || ['2026']).join('·') + '년 확정 / ' + S.provisionalYears.join('·') + '년은 연초에 확인해 주세요.'
+        : '확정본입니다.');
   } catch (e) {
     $('setup-msg').className = 'formmsg bad';
     $('setup-msg').textContent = '설정을 불러오지 못했어요: ' + e.message;
@@ -1180,6 +1303,10 @@ function drawTeacherRows(dupIds, errRow, errMsg) {
     body.appendChild(tr);
   });
 }
+$('hol-add').addEventListener('click', function () {
+  holidayRows.push({ date: '', name: '' });
+  drawHolidayRows();
+});
 $('tea-add').addEventListener('click', function () {
   // 아직 안 쓴 팔레트 색부터 준다 — 연달아 추가해도 같은 색이 겹치지 않는다
   var used = setupRows.map(function (r) { return r.color; }).filter(Boolean);
@@ -1191,11 +1318,13 @@ $('setup-save').addEventListener('click', async function () {
   msg.className = 'formmsg'; msg.textContent = '';
   try {
     var r = await api('PUT', '/api/settings', {
-      room: { name: $('room-name').value },
+      room: { name: $('room-name').value, schoolHolidays: holidayRows },
       teachers: setupRows
     });
     setupRows = r.teachers.map(function (t) { return Object.assign({}, t); });
+    holidayRows = ((r.room && r.room.schoolHolidays) || []).map(function (h) { return Object.assign({}, h); });
     drawTeacherRows(r.duplicateIds || []);
+    drawHolidayRows();
     msg.className = 'formmsg good';
     msg.textContent = (r.duplicateIds && r.duplicateIds.length)
       ? '저장했어요. CODE 가 겹치는 분이 있으니 표시된 줄을 6자리로 바꿔 주세요.'
@@ -1204,15 +1333,19 @@ $('setup-save').addEventListener('click', async function () {
     // 어느 줄이 문제인지 서버가 짚어 주면 그 줄 아래에 빨간 글씨로 붙인다.
     // 이때는 성공 문구를 절대 띄우지 않는다 — 저장되지 않았기 때문이다.
     var row = e.body && typeof e.body.row === 'number' ? e.body.row : -1;
+    var hrow = e.body && typeof e.body.holidayRow === 'number' ? e.body.holidayRow : -1;
     drawTeacherRows([], row, row >= 0 ? e.message : null);
+    drawHolidayRows(hrow, hrow >= 0 ? e.message : null);
     msg.className = 'formmsg bad';
-    msg.textContent = row >= 0
+    msg.textContent = (row >= 0 || hrow >= 0)
       ? '저장하지 못했어요. 표시된 줄을 고쳐 주세요.'
       : '저장하지 못했어요: ' + e.message + ' 값을 확인하고 다시 눌러 주세요.';
   }
 });
 $('setup-export').addEventListener('click', function () {
-  var blob = new Blob([JSON.stringify({ room: { name: $('room-name').value }, teachers: setupRows }, null, 2)],
+  var blob = new Blob([JSON.stringify({
+    room: { name: $('room-name').value, schoolHolidays: holidayRows }, teachers: setupRows
+  }, null, 2)],
     { type: 'application/json' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1228,6 +1361,7 @@ $('setup-file').addEventListener('change', function () {
     try {
       var j = JSON.parse(fr.result);
       if (j.room && typeof j.room.name === 'string') $('room-name').value = j.room.name;
+      if (j.room && Array.isArray(j.room.schoolHolidays)) { holidayRows = j.room.schoolHolidays; drawHolidayRows(); }
       if (Array.isArray(j.teachers)) { setupRows = j.teachers; drawTeacherRows([]); }
       $('setup-msg').className = 'formmsg';
       $('setup-msg').textContent = '불러왔어요. 확인한 뒤 [저장]을 눌러야 반영됩니다.';
@@ -1247,7 +1381,7 @@ setInterval(function () {
 
 // ── 시작 ─────────────────────────────────────────────
 (async function () {
-  try { var r = await api('GET', '/api/room'); setVersion(r.version); } catch (e) {}
+  try { takeRoom(await api('GET', '/api/room')); } catch (e) {}
   try { await loadMe(); if (!location.hash || location.hash === '#login') location.hash = '#cal'; }
   catch (e) { location.hash = '#login'; }
   route();

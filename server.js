@@ -16,6 +16,7 @@ var store = require('./lib/store');
 var Slots = require('./public/shared/slots.js');
 // 화면에 찍히는 판 번호. package.json 하나만 올리면 서버·화면이 따라온다.
 var VERSION = require('./package.json').version;
+var Holidays = require('./lib/holidays');
 
 var PORT = process.env.PORT || 3000;
 var MASTER_CODE = String(process.env.MASTER_CODE || '').trim();
@@ -199,7 +200,8 @@ app.get('/api/data', requireAuth, function (req, res) {
   res.json({
     role: req.session.role,
     me: me ? { id: me.id, name: me.name, cls: me.cls, color: me.color } : { id: req.session.teacherId, name: '담당 선생님', cls: '' },
-    room: { name: d.room.name },
+    // 학교 휴업일은 달력을 칠하는 데 쓰이므로 선생님에게도 함께 보낸다
+    room: { name: d.room.name, schoolHolidays: d.room.schoolHolidays },
     teachers: publicTeachers(req.session, d),
     programs: v.programs,
     blocks: v.blocks,
@@ -327,7 +329,10 @@ app.delete('/api/blocks/:id', requireAuth, function (req, res) {
 // ===== 설정 — 마스터 전용 =====
 app.get('/api/settings', requireAuth, requireMaster, function (req, res) {
   var d = store.load();
-  res.json({ room: { name: d.room.name }, teachers: d.room.teachers });
+  res.json({
+    room: { name: d.room.name, schoolHolidays: d.room.schoolHolidays },
+    teachers: d.room.teachers
+  });
 });
 
 // 명단에서 뺀 선생님의 수업 배정·안 되는 날은 **지우지 않는다**.
@@ -336,6 +341,20 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
   var b = req.body || {};
   var d = store.load();
   if (b.room && typeof b.room.name === 'string') d.room.name = clean(b.room.name, 60) || d.room.name;
+
+  // 학교 휴업일 — 날짜가 어긋나면 그 줄을 짚어 되돌린다(조용히 버리지 않는다)
+  if (b.room && Array.isArray(b.room.schoolHolidays)) {
+    var badDay = -1;
+    b.room.schoolHolidays.forEach(function (h, i) {
+      if (badDay < 0 && !isDate(h && h.date)) badDay = i;
+    });
+    if (badDay >= 0) {
+      return res.status(400).json({ error: '휴업일 날짜를 확인해 주세요. (예: 2026-10-06)', holidayRow: badDay });
+    }
+    d.room.schoolHolidays = b.room.schoolHolidays.map(function (h) {
+      return { date: h.date, name: clean(h.name, 30) };
+    }).sort(function (x, y) { return x.date < y.date ? -1 : 1; });
+  }
 
   if (Array.isArray(b.teachers)) {
     // 뒷자리는 자르지 않는다. 5자리를 4자리로 몰래 깎으면 그 선생님은 자기가 받은
@@ -394,12 +413,23 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
   var dupes = Object.keys(byTail).filter(function (k) { return byTail[k].length > 1; })
     .reduce(function (acc, k) { return acc.concat(byTail[k]); }, []);
 
-  res.json({ ok: true, room: { name: d.room.name }, teachers: d.room.teachers, duplicateIds: dupes });
+  res.json({
+    ok: true,
+    room: { name: d.room.name, schoolHolidays: d.room.schoolHolidays },
+    teachers: d.room.teachers,
+    duplicateIds: dupes
+  });
 });
 
 // 로그인 화면에 방 이름을 띄우기 위한 것. 이름 말고는 아무것도 내보내지 않는다.
 app.get('/api/room', function (req, res) {
-  res.json({ name: store.load().room.name, version: VERSION });
+  res.json({
+    name: store.load().room.name,
+    version: VERSION,
+    holidays: Holidays.LIST,                       // 내장 공휴일(화면이 달력에 칠한다)
+    provisionalYears: Holidays.PROVISIONAL_YEARS,  // 아직 확정 전인 해
+    confirmedYears: Holidays.CONFIRMED_YEARS
+  });
 });
 
 // ===== 상태 확인 =====
