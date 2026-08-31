@@ -163,6 +163,18 @@ th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;font-s
 th{background:#fafbf8;font-weight:600;color:var(--dim)}
 td input[type=text]{width:100%;padding:6px;border:1px solid var(--line);border-radius:7px}
 td input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer}
+/* 색 고르개 */
+.swatch-btn{width:38px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px}
+.swatch-btn:hover{border-color:var(--ink)}
+.cpop{position:absolute;z-index:20;top:100%;left:0;margin-top:4px;padding:8px;background:#fff;
+  border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.cpop-grid{display:grid;grid-template-columns:repeat(5,24px);gap:6px}
+.cpop-cell{width:24px;height:24px;padding:0;border:1px solid rgba(0,0,0,.15);border-radius:6px;position:relative}
+.cpop-cell:hover{outline:2px solid var(--ink);outline-offset:1px}
+.cpop-cell.dim{opacity:.35}
+.cpop-cell.on::after{content:'✓';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:14px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.45)}
+.cpop-own{display:block;margin-top:8px;font-size:12.5px}
 td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer}
 .warn-cell{color:var(--red);font-size:12px}
 .setup-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
@@ -186,7 +198,6 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
   <div class="top">
     <h1>🌱 <span id="cal-room"></span></h1>
     <span class="badge" id="cal-me"></span>
-    <span class="sub-owner" id="cal-owner"></span>
     <button class="linkish side-door hide" id="go-setup">설정</button>
     <button id="cal-out">나가기</button>
   </div>
@@ -261,6 +272,8 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
 
 <!-- 시간대·겹침 규칙. 서버(server.js)가 require 하는 바로 그 파일이다. -->
 <script src="/shared/slots.js"></script>
+<!-- 색 팔레트. lib/store.js 가 require 하는 바로 그 파일이다. -->
+<script src="/shared/palette.js"></script>
 <script>
 'use strict';
 // ── 아주 작은 도구들 ─────────────────────────────────
@@ -403,15 +416,8 @@ function namesInOrder(pr) {
   return ids.indexOf('master') >= 0 ? ['master'].concat(rest) : rest;
 }
 
-// 선생님 색 팔레트(lib/store.js 와 같은 순서). 아직 안 쓴 색부터 준다.
-var PALETTE = ['#2f855a', '#2b6cb0', '#b7791f', '#9b2c2c', '#553c9a', '#0f766e', '#a15c07', '#9d174d'];
-function pickColor(usedColors) {
-  var used = usedColors || [];
-  for (var i = 0; i < PALETTE.length; i++) {
-    if (used.indexOf(PALETTE[i]) < 0) return PALETTE[i];
-  }
-  return PALETTE[used.length % PALETTE.length];   // 팔레트를 다 썼을 때만 순환
-}
+// 색 팔레트는 서버와 같은 파일(/shared/palette.js)에서 온다. 여기서 다시 적지 않는다.
+function pickColor(usedColors) { return Palette.pick(usedColors); }
 
 // 겹침: 같은 날, 그 수업 담당인 사람의 '안 되는 날' 이고, 시간대까지 부딪히는가.
 // 시간대 판정은 서버와 같은 파일(Slots)을 쓴다.
@@ -542,9 +548,6 @@ async function refresh() {
 function renderCal() {
   $('cal-room').textContent = S.room.name || '디지털새싹 일정판';
   $('cal-me').textContent = (S.me.name || '') + (S.me.cls ? ' · ' + S.me.cls : '');
-  // 선생님에게는 담당자가 누구인지 늘 보이게 한다(담당자 자신에게는 필요 없다)
-  var mnTop = (S.role === 'master') ? '' : masterName();
-  $('cal-owner').textContent = mnTop ? '담당자 ' + mnTop : '';
   $('go-setup').classList.toggle('hide', S.role !== 'master');
   $('teacher-note').classList.toggle('hide', S.role === 'master');
   $('legend-grade').classList.toggle('hide', S.role !== 'master');
@@ -1034,7 +1037,60 @@ async function renderSetup() {
     $('setup-msg').textContent = '설정을 불러오지 못했어요: ' + e.message;
   }
 }
+// ── 색 고르개(팝오버) ───────────────────────────────
+// 열려 있는 것은 언제나 하나뿐이다. 바깥을 누르거나 Esc 를 누르면 닫힌다.
+var colorPop = null;
+function closeColorPop() {
+  if (!colorPop) return false;
+  colorPop.remove();
+  colorPop = null;
+  return true;
+}
+document.addEventListener('click', function () { closeColorPop(); });
+window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeColorPop(); });
+
+function openColorPop(cell, teacher, swatch, colorInput, idx) {
+  var pop = el('div', 'cpop');
+  pop.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  var grid = el('div', 'cpop-grid');
+  Palette.COLORS.forEach(function (hex) {
+    var b = el('button', 'cpop-cell');
+    b.style.background = hex;
+    // 이미 다른 분이 쓰는 색은 흐리게 둔다. 막지는 않는다 — 같은 색을 쓰겠다면 그것도 선택이다.
+    var owner = setupRows.filter(function (r, i) {
+      return i !== idx && r.color === hex && (r.name || '').trim();
+    })[0];
+    if (owner) {
+      b.classList.add('dim');
+      b.title = owner.name + ' 선생님이 쓰는 색';
+    } else {
+      b.title = Palette.nameOf(hex) || hex;
+    }
+    if ((teacher.color || '') === hex) b.classList.add('on');
+    b.addEventListener('click', function () {
+      teacher.color = hex;
+      colorInput.value = hex;
+      swatch.style.background = hex;
+      closeColorPop();
+    });
+    grid.appendChild(b);
+  });
+  pop.appendChild(grid);
+
+  var own = el('button', 'linkish cpop-own', '직접 고르기');
+  own.addEventListener('click', function () {
+    closeColorPop();
+    colorInput.click();
+  });
+  pop.appendChild(own);
+
+  cell.appendChild(pop);
+  colorPop = pop;
+}
+
 function drawTeacherRows(dupIds, errRow, errMsg) {
+  closeColorPop();
   var body = $('tea-body');
   body.innerHTML = '';
   setupRows.forEach(function (t, idx) {
@@ -1072,9 +1128,24 @@ function drawTeacherRows(dupIds, errRow, errMsg) {
     }
     tr.appendChild(td3);
 
+    // 색 — 네모를 누르면 견본 10개가 뜨고, 그래도 마음에 안 들면 직접 고른다.
     var td4 = el('td');
-    var col = el('input'); col.type = 'color'; col.value = t.color || '#2f855a';
-    col.addEventListener('input', function () { t.color = col.value; });
+    td4.style.position = 'relative';
+    var col = el('input'); col.type = 'color'; col.value = t.color || Palette.COLORS[0];
+    col.className = 'hide';
+    col.addEventListener('input', function () {
+      t.color = col.value;
+      swatch.style.background = col.value;
+    });
+    var swatch = el('button', 'swatch-btn');
+    swatch.style.background = t.color || Palette.COLORS[0];
+    swatch.title = '색 고르기';
+    swatch.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (closeColorPop()) return;      // 열려 있던 것을 닫는 것으로 끝낸다(토글)
+      openColorPop(td4, t, swatch, col, idx);
+    });
+    td4.appendChild(swatch);
     td4.appendChild(col);
     tr.appendChild(td4);
 
