@@ -79,6 +79,10 @@ button:hover{background:#eef1ea}
 /* 담당이 여러 명일 때 카드 끝에 나머지 사람의 색을 점으로 남긴다 */
 .card .co-dot{display:inline-block;width:6px;height:6px;border-radius:50%;flex:none;
   border:1px solid rgba(255,255,255,.7)}
+/* 내 담당이 아닌데 보이는 수업(전체 공개) — 내 것이 아님이 한눈에 드러나게 흰 바탕 */
+.card.open{background:#fff;color:var(--ink);border:1px solid var(--green)}
+.card.open .tag-all{background:#eef1ea;color:var(--dim)}
+.sub-owner{font-size:12px;color:var(--dim)}
 .card.block{background:var(--dim);color:#fff;
   background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.28) 0 4px,transparent 4px 8px)}
 .card.clash{outline:2px solid var(--red);outline-offset:-2px}
@@ -177,6 +181,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
   <div class="top">
     <h1>🌱 <span id="cal-room"></span></h1>
     <span class="badge" id="cal-me"></span>
+    <span class="sub-owner" id="cal-owner"></span>
     <button class="linkish side-door hide" id="go-setup">설정</button>
     <button id="cal-out">나가기</button>
   </div>
@@ -330,6 +335,49 @@ function colorOf(p) {
   return t ? t.color : '#8a8f85';
 }
 function masterJoins(p) { return (p.teacherIds || []).indexOf('master') >= 0; }
+// 담당자 이름은 명단의 master 행에서 온다. 비어 있으면 이름 자리를 아예 비운다.
+function masterName() {
+  var t = teacherOf('master');
+  return (t && t.name) ? t.name : '';
+}
+
+// 선생님 화면 수업 카드 색 — 신분 색을 쓰지 않는다. 남의 색을 알 이유가 없고,
+// 자기 화면에서는 '수업이냐 아니냐' 만 구분되면 된다. 범례의 초록 하나로 통일.
+var TEACHER_CARD = '#2f855a';
+
+// 선생님 화면에서 수업의 담당을 적는 말. 본인 이름은 절대 쓰지 않는다 —
+// 자기 화면에서 자기 이름을 읽는 일은 없다. 대신 '내 수업' 이다.
+function teacherOwnerText(pr, meId, nameFn, masterNm) {
+  var ids = pr.teacherIds || [];
+  var mine = ids.indexOf(meId) >= 0;
+  var others = ids.filter(function (id) { return id !== meId && id !== 'master'; });
+  var hasMaster = ids.indexOf('master') >= 0;
+  var tail = (hasMaster && masterNm) ? ' · ' + masterNm + ' 선생님(담당자) 참석' : '';
+  if (mine) {
+    var base = '내 수업';
+    if (others.length) base += ' · ' + others.map(nameFn).join(', ') + ' 선생님과 함께';
+    return base + tail;
+  }
+  // 내 담당이 아닌데 보인다는 것은 전체 공개 수업이라는 뜻이다
+  if (!others.length && hasMaster && masterNm) return masterNm + ' 선생님(담당자) 수업 · 전체 공개';
+  var who = others.length ? others.map(nameFn).join(', ') + ' 선생님 수업' : '전체 공개 수업';
+  return who + ' · 전체 공개' + tail;
+}
+
+// 상세 패널 수업 카드의 둘째 줄. '나도 참석' 같은 담당자 시점 말은
+// role === 'master' 안에만 있고 선생님 쪽으로는 새어 나가지 않는다.
+function programOwnerLine(pr, role, meId, nameFn, masterNm) {
+  var t = pr.start + '–' + pr.end;
+  if (role === 'master') {
+    var ids = (pr.teacherIds || []).filter(function (id) { return id !== 'master'; });
+    var who = ids.map(nameFn).join(', ');
+    var line = t + (who ? ' · ' + who : '');
+    if ((pr.teacherIds || []).indexOf('master') >= 0) line += ' · 나도 참석';
+    if (pr.visibility === 'all') line += ' · 전체 공개';
+    return line;
+  }
+  return t + ' · ' + teacherOwnerText(pr, meId, nameFn, masterNm);
+}
 
 // 카드 글자와 표식을 만드는 순수 함수. 화면 밖에서도 그대로 부를 수 있게
 // S 를 건드리지 않고 이름 찾기 함수를 받는다(검증에서 이 함수를 직접 부른다).
@@ -472,6 +520,9 @@ async function refresh() {
 function renderCal() {
   $('cal-room').textContent = S.room.name || '디지털새싹 일정판';
   $('cal-me').textContent = (S.me.name || '') + (S.me.cls ? ' · ' + S.me.cls : '');
+  // 선생님에게는 담당자가 누구인지 늘 보이게 한다(담당자 자신에게는 필요 없다)
+  var mnTop = (S.role === 'master') ? '' : masterName();
+  $('cal-owner').textContent = mnTop ? '담당자 ' + mnTop : '';
   $('go-setup').classList.toggle('hide', S.role !== 'master');
   $('teacher-note').classList.toggle('hide', S.role === 'master');
   $('legend-grade').classList.toggle('hide', S.role !== 'master');
@@ -511,7 +562,13 @@ function dayCell(dateObj, monthNo) {
   S.programs.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (pr) {
     var parts = programCardParts(pr, S.role, nameOf);
     var c = el('div', 'card');
-    c.style.background = colorOf(pr);
+    if (S.role === 'master') {
+      c.style.background = colorOf(pr);          // 담당자 화면: 담당 선생님 신분 색
+    } else if ((pr.teacherIds || []).indexOf(S.me.id) >= 0) {
+      c.style.background = TEACHER_CARD;         // 내 수업: 범례의 초록 하나
+    } else {
+      c.classList.add('open');                   // 내 것이 아닌 전체 공개 수업: 흰 바탕
+    }
     c.title = parts.text;                       // 잘린 제목은 마우스로 확인
     c.appendChild(el('span', 'card-text', parts.text));
     // 담당이 2명 이상이면 나머지 사람의 색을 순서대로 점으로 남긴다
@@ -610,27 +667,50 @@ function renderPanel() {
   box.appendChild(el('h2', null, shortDate(ds).replace('/', '월 ') + '일'));
 
   if (cl.length) {
-    var names = cl.map(function (c) { return nameOf(c.block.teacherId); });
-    var uniq = names.filter(function (n, i) { return names.indexOf(n) === i; });
-    var txt = uniq.join(', ') + ' 선생님이 이날 안 된다고 적었어요. 수업 날짜를 옮기거나 확인해 보세요.';
-    if (S.role !== 'master') txt += ' 담당자에게도 같은 표시가 보입니다.';
+    var txt;
+    if (S.role === 'master') {
+      var names = cl.map(function (c) { return nameOf(c.block.teacherId); });
+      var uniq = names.filter(function (n, i) { return names.indexOf(n) === i; });
+      txt = uniq.join(', ') + ' 선생님이 이날 안 된다고 적었어요. 수업 날짜를 옮기거나 확인해 보세요.';
+    } else {
+      // 선생님 화면에서는 그 '안 된다고 적은 사람' 이 언제나 본인이다
+      var mn = masterName();
+      txt = '이날 안 된다고 적으셨어요. ' +
+        (mn ? mn + ' 선생님(담당자)' : '담당자') + '에게도 같은 표시가 보입니다.';
+    }
     box.appendChild(el('div', 'clash-box', txt));
   }
 
   var prs = S.programs.filter(function (p) { return p.date === ds; });
   var bls = S.blocks.filter(function (b) { return b.date === ds; });
 
-  if (!prs.length && !bls.length) box.appendChild(el('div', 'empty', '이날은 적힌 일정이 없어요.'));
+  if (S.role === 'master') {
+    if (!prs.length && !bls.length) box.appendChild(el('div', 'empty', '이날은 적힌 일정이 없어요.'));
+  } else if (!prs.length) {
+    // 선생님이 처음 들어오면 오늘 칸이 비어 있기 쉽다. 빈 화면 대신 이달 내 수업이
+    // 몇 건인지와 가장 가까운 날로 가는 길을 준다.
+    var mine = S.programs.filter(function (p) { return (p.teacherIds || []).indexOf(S.me.id) >= 0; });
+    var inMonth = mine.filter(function (p) { return p.date.slice(0, 7) === S.month; });
+    if (inMonth.length === 0) {
+      box.appendChild(el('div', 'empty', '아직 배정된 수업이 없어요.'));
+    } else {
+      box.appendChild(el('div', 'empty', '이달 내 수업 ' + inMonth.length + '건'));
+      var sorted = inMonth.slice().sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+      var near = sorted.filter(function (p) { return p.date >= today(); })[0] || sorted[sorted.length - 1];
+      var go = el('button', 'linkish', shortDate(near.date) + ' 수업 보기');
+      go.addEventListener('click', function () {
+        S.pick = near.date;
+        S.month = near.date.slice(0, 7);
+        refresh();
+      });
+      box.appendChild(go);
+    }
+  }
 
   prs.forEach(function (pr) {
     var r = el('div', 'row' + (programClashes(pr) ? ' clash' : ''));
     r.appendChild(el('div', 'ttl', pr.title));
-    var ids = cardTeachers(pr);
-    var who = ids.length ? ids.map(nameOf).join(', ') : (masterJoins(pr) ? '' : '담당 미정');
-    var line = pr.start + '–' + pr.end + (who ? ' · ' + who : '');
-    if (masterJoins(pr)) line += ' · 나도 참석';
-    if (pr.visibility === 'all') line += ' · 전체 공개';
-    r.appendChild(el('div', 'who', line));
+    r.appendChild(el('div', 'who', programOwnerLine(pr, S.role, S.me.id, nameOf, masterName())));
     if (pr.memo) r.appendChild(el('div', 'who', pr.memo));
     // 내가 안 된다고 적어 둔 날인데 내가 참석하지 않는 수업이면, 겹침이 아니라는 것을
     // 회색 한 줄로 알려 준다(빨간 상자는 담당 선생님과 겹칠 때만 쓴다).
@@ -711,6 +791,7 @@ function renderPanel() {
 
 // ── 수업 배정 폼(마스터) ─────────────────────────────
 function openProgramForm(pr) {
+  if (S.role !== 'master') return;   // 담당자 시점 폼이다. 다른 길로도 열리지 않게 여기서 막는다.
   S.formOpen = true; S.editing = pr;
   var box = $('panel');
   box.innerHTML = '';
