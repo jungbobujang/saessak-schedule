@@ -166,8 +166,8 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
 <section id="view-login" class="hide">
   <div class="sprout">🌱</div>
   <h1 id="login-room">디지털새싹 일정판</h1>
-  <p>휴대폰 뒷자리로 들어갑니다</p>
-  <input id="login-code" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="휴대폰 뒷자리 4자리">
+  <p>코드를 입력해 들어갑니다</p>
+  <input id="login-code" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="CODE">
   <button class="btn-main" id="login-go">들어가기</button>
   <div class="msg" id="login-msg"></div>
 </section>
@@ -230,9 +230,9 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         <h2>방 이름</h2>
         <input type="text" id="room-name" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px">
         <h2 style="margin-top:18px">선생님 명단</h2>
-        <p class="note-line" style="margin:0 0 8px">선생님 휴대폰 뒷자리 4자리가 그분의 입장 코드가 됩니다. 사이트 주소와 함께 알려 주세요.</p>
+        <p class="note-line" style="margin:0 0 8px">각 선생님의 CODE — 휴대폰 뒷자리 4자리를 권장합니다. 사이트 주소와 함께 알려 주세요.</p>
         <table>
-          <thead><tr><th style="width:22%">이름</th><th style="width:12%">반</th><th style="width:20%">뒷자리 4자리(겹치면 6자리)</th><th style="width:10%">색</th><th style="width:22%">조율 등급</th><th></th></tr></thead>
+          <thead><tr><th style="width:22%">이름</th><th style="width:12%">반</th><th style="width:20%">CODE(4자리, 겹치면 6자리)</th><th style="width:10%">색</th><th style="width:22%">조율 등급</th><th></th></tr></thead>
           <tbody id="tea-body"></tbody>
         </table>
         <div class="setup-acts">
@@ -402,7 +402,7 @@ async function doLogin() {
   var code = $('login-code').value.replace(/\D/g, '');
   var msg = $('login-msg');
   msg.textContent = '';
-  if (!code) { msg.textContent = '뒷자리를 입력해 주세요.'; return; }
+  if (!code) { msg.textContent = '코드를 입력해 주세요.'; return; }
   try {
     var r = await api('POST', '/api/login', { code: code });
     if (r.ambiguous) {
@@ -963,7 +963,7 @@ function drawTeacherRows(dupIds, errRow, errMsg) {
       code.addEventListener('input', function () { t.code = code.value.replace(/\D/g, ''); });
       td3.appendChild(code);
       if ((dupIds || []).indexOf(t.id) >= 0) {
-        td3.appendChild(el('div', 'warn-cell', '뒷자리가 같은 선생님이 있어요. 두 분은 6자리로 등록해 주세요.'));
+        td3.appendChild(el('div', 'warn-cell', '같은 CODE 를 쓰는 선생님이 있어요. 두 분은 6자리로 등록해 주세요.'));
       }
       if (errRow === idx && errMsg) td3.appendChild(el('div', 'warn-cell', errMsg));
     }
@@ -1024,7 +1024,7 @@ $('setup-save').addEventListener('click', async function () {
     drawTeacherRows(r.duplicateIds || []);
     msg.className = 'formmsg good';
     msg.textContent = (r.duplicateIds && r.duplicateIds.length)
-      ? '저장했어요. 뒷자리가 겹치는 분이 있으니 표시된 줄을 6자리로 바꿔 주세요.'
+      ? '저장했어요. CODE 가 겹치는 분이 있으니 표시된 줄을 6자리로 바꿔 주세요.'
       : '저장했어요.';
   } catch (e) {
     // 어느 줄이 문제인지 서버가 짚어 주면 그 줄 아래에 빨간 글씨로 붙인다.

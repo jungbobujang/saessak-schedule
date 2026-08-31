@@ -148,7 +148,7 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] })
 // 뒷자리 4자리로 들어온다. 4자리로 두 명 이상이 걸리면 앞 2자리를 더 받아 6자리로 가른다.
 app.post('/api/login', function (req, res) {
   var code = clean(req.body && req.body.code, 20).replace(/\D/g, '');
-  if (!code) return res.status(400).json({ error: '뒷자리를 입력해 주세요.' });
+  if (!code) return res.status(400).json({ error: '코드를 입력해 주세요.' });
 
   if (MASTER_CODE && code === MASTER_CODE) {
     issueSession(res, { role: 'master', teacherId: 'master' });
@@ -169,9 +169,9 @@ app.post('/api/login', function (req, res) {
     return res.json({ ok: true, role: 'teacher', name: hits[0].name });
   }
   if (hits.length > 1) {
-    return res.json({ ambiguous: true, error: '뒷자리가 같은 분이 있어요. 앞 2자리를 더 입력해 주세요.' });
+    return res.json({ ambiguous: true, error: '같은 코드를 쓰는 분이 있어요. 앞 2자리를 더 입력해 주세요.' });
   }
-  return res.status(401).json({ error: '등록된 번호가 아니에요. 담당 선생님께 확인해 주세요.' });
+  return res.status(401).json({ error: '등록된 코드가 아니에요. 담당 선생님께 확인해 주세요.' });
 });
 
 app.get('/api/me', function (req, res) {
