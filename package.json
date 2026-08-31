@@ -1,6 +1,6 @@
 {
   "name": "saessak-schedule",
-  "version": "1.0.0",
+  "version": "1.6.0",
   "private": true,
   "description": "디지털새싹 일정판 — 학교 담당자가 동료 선생님들과 수업 일정을 조율하는 도구",
   "main": "server.js",

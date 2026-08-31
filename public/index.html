@@ -83,6 +83,10 @@ button:hover{background:#eef1ea}
 .card.open{background:#fff;color:var(--ink);border:1px solid var(--green)}
 .card.open .tag-all{background:#eef1ea;color:var(--dim)}
 .sub-owner{font-size:12px;color:var(--dim)}
+/* 판 번호 — package.json 의 version 을 그대로 받아 적는다 */
+.ver{font-size:11.5px;color:var(--dim)}
+.legend .ver{margin-left:auto}
+#view-login .ver{margin-top:22px}
 .card.block{background:var(--dim);color:#fff;
   background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.28) 0 4px,transparent 4px 8px)}
 .card.clash{outline:2px solid var(--red);outline-offset:-2px}
@@ -174,6 +178,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
   <input id="login-code" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="CODE">
   <button class="btn-main" id="login-go">들어가기</button>
   <div class="msg" id="login-msg"></div>
+  <div class="ver" id="login-ver"></div>
 </section>
 
 <!-- ══ 달력 ════════════════════════════════ -->
@@ -207,6 +212,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         <span><i class="lg-p"></i>디지털새싹 수업</span>
         <span><i class="lg-b"></i>안 되는 날(개인)</span>
         <span><i class="lg-c"></i>겹침</span>
+        <span class="ver" id="ver"></span>
       </div>
       <div class="legend hide" id="legend-grade">
         <span>조율 등급</span>
@@ -293,7 +299,8 @@ var S = {
   pick: today(),          // 선택한 날짜
   hidden: {},             // 칩으로 끈 선생님 id
   formOpen: false,        // 폼이 열려 있으면 폴링을 쉰다(치던 값이 날아가지 않게)
-  editing: null           // 수정 중인 수업
+  editing: null,          // 수정 중인 수업
+  version: ''             // 서버가 알려 주는 판 번호
 };
 S.month = today().slice(0, 7);
 
@@ -324,7 +331,8 @@ function nameOf(id) {
   var t = teacherOf(id);
   return t ? (t.name || '이름 없음') : '(삭제된 선생님)';
 }
-// 카드에 이름으로 적을 담당 — 담당자(나)는 이름 대신 👤 표식으로 말한다.
+// 카드 배경색을 고를 때 쓰는 담당 목록 — 담당자(나)는 뺀다.
+// 이름 표기는 namesInOrder 가 따로 맡는다(담당자도 이름으로 선다).
 function cardTeachers(p) {
   return (p.teacherIds || []).filter(function (id) { return id !== 'master'; });
 }
@@ -364,15 +372,14 @@ function teacherOwnerText(pr, meId, nameFn, masterNm) {
   return who + ' · 전체 공개' + tail;
 }
 
-// 상세 패널 수업 카드의 둘째 줄. '나도 참석' 같은 담당자 시점 말은
-// role === 'master' 안에만 있고 선생님 쪽으로는 새어 나가지 않는다.
+// 상세 패널 수업 카드의 둘째 줄. 담당자 시점의 말은 role === 'master' 안에만 두고
+// 선생님 쪽으로는 새어 나가지 않게 한다.
 function programOwnerLine(pr, role, meId, nameFn, masterNm) {
   var t = pr.start + '–' + pr.end;
   if (role === 'master') {
-    var ids = (pr.teacherIds || []).filter(function (id) { return id !== 'master'; });
-    var who = ids.map(nameFn).join(', ');
+    // 카드와 같은 규칙 — 담당자 자신을 포함한 전원을 · 로 잇는다.
+    var who = namesInOrder(pr).map(nameFn).join('·');
     var line = t + (who ? ' · ' + who : '');
-    if ((pr.teacherIds || []).indexOf('master') >= 0) line += ' · 나도 참석';
     if (pr.visibility === 'all') line += ' · 전체 공개';
     return line;
   }
@@ -382,12 +389,18 @@ function programOwnerLine(pr, role, meId, nameFn, masterNm) {
 // 카드 글자와 표식을 만드는 순수 함수. 화면 밖에서도 그대로 부를 수 있게
 // S 를 건드리지 않고 이름 찾기 함수를 받는다(검증에서 이 함수를 직접 부른다).
 function programCardParts(pr, role, nameFn) {
-  var ids = (pr.teacherIds || []).filter(function (id) { return id !== 'master'; });
-  var prefix = (role === 'master' && ids.length) ? ids.map(nameFn).join('·') + ' · ' : '';
+  var prefix = (role === 'master') ? namesInOrder(pr).map(nameFn).join('·') : '';
   var marks = [];
-  if (role === 'master' && (pr.teacherIds || []).indexOf('master') >= 0) marks.push('👤');
   if (pr.visibility === 'all') marks.push('전체 공개');
-  return { text: pr.start + ' ' + prefix + pr.title, marks: marks };
+  return { text: pr.start + ' ' + (prefix ? prefix + ' · ' : '') + pr.title, marks: marks };
+}
+
+// 담당자 화면에 이름을 늘어놓는 순서 — 담당자 자신이 맨 앞, 나머지는 적힌 차례대로.
+// 별도의 참석 표식을 두지 않고 이름으로 말한다.
+function namesInOrder(pr) {
+  var ids = pr.teacherIds || [];
+  var rest = ids.filter(function (id) { return id !== 'master'; });
+  return ids.indexOf('master') >= 0 ? ['master'].concat(rest) : rest;
 }
 
 // 선생님 색 팔레트(lib/store.js 와 같은 순서). 아직 안 쓴 색부터 준다.
@@ -441,7 +454,16 @@ async function route() {
   try {
     var r = await api('GET', '/api/room');
     $('login-room').textContent = r.name || '디지털새싹 일정판';
+    setVersion(r.version);
   } catch (e) {}
+}
+
+// 판 번호는 서버가 package.json 에서 읽어 준다. 화면은 받아 적기만 한다.
+function setVersion(v) {
+  if (v) S.version = v;
+  var text = S.version ? 'v' + S.version : '';
+  $('ver').textContent = text;
+  $('login-ver').textContent = text;
 }
 window.addEventListener('hashchange', route);
 
@@ -1154,6 +1176,7 @@ setInterval(function () {
 
 // ── 시작 ─────────────────────────────────────────────
 (async function () {
+  try { var r = await api('GET', '/api/room'); setVersion(r.version); } catch (e) {}
   try { await loadMe(); if (!location.hash || location.hash === '#login') location.hash = '#cal'; }
   catch (e) { location.hash = '#login'; }
   route();

@@ -14,6 +14,8 @@ var path = require('path');
 var store = require('./lib/store');
 // 시간대·겹침 규칙은 화면과 같은 파일을 쓴다 (public 아래라 브라우저도 같은 것을 읽는다)
 var Slots = require('./public/shared/slots.js');
+// 화면에 찍히는 판 번호. package.json 하나만 올리면 서버·화면이 따라온다.
+var VERSION = require('./package.json').version;
 
 var PORT = process.env.PORT || 3000;
 var MASTER_CODE = String(process.env.MASTER_CODE || '').trim();
@@ -397,7 +399,7 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
 
 // 로그인 화면에 방 이름을 띄우기 위한 것. 이름 말고는 아무것도 내보내지 않는다.
 app.get('/api/room', function (req, res) {
-  res.json({ name: store.load().room.name });
+  res.json({ name: store.load().room.name, version: VERSION });
 });
 
 // ===== 상태 확인 =====
@@ -405,6 +407,7 @@ app.get('/api/health', function (req, res) {
   var d = store.load();
   res.json({
     ok: !store.isDamaged(),
+    version: VERSION,
     dataPath: path.resolve(store.DATA_FILE),
     fileExists: store.fileExists(),
     masterCodeValid: MASTER_CODE_VALID,
