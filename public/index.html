@@ -51,24 +51,34 @@ button:hover{background:#eef1ea}
 .calbar{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .calbar .month{font-size:17px;font-weight:600;min-width:120px}
 .grid{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.dow,.week{display:grid;grid-template-columns:repeat(7,1fr)}
+/* minmax(0,1fr) 이 핵심이다. 그냥 1fr 이면 최소 크기가 '내용 크기' 라서
+   긴 제목 한 줄이 그 열을 통째로 넓히고 나머지 요일이 찌그러진다. */
+.dow,.week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
 .dow div{padding:8px 0;text-align:center;font-size:13px;color:var(--dim);background:#fafbf8;border-bottom:1px solid var(--line)}
 .dow .sun,.day.sun .dnum{color:var(--red)}
 .dow .sat,.day.sat .dnum{color:var(--blue)}
 .day{min-height:104px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);
-  padding:5px 5px 16px;position:relative;background:#fff}
+  padding:5px 5px 16px;position:relative;background:#fff;min-width:0;overflow:hidden}
 .day:nth-child(7n){border-right:none}
 .day.other{background:#fbfbfa}
 .day.other .dnum{color:#c2c8bd}
-.day.pick{box-shadow:inset 0 0 0 2px var(--green)}
+/* 선택 표시는 outline 으로 준다. border 면 칸이 2px 커져 그 주가 밀린다. */
+.day.pick{outline:2px solid var(--green);outline-offset:-2px}
 .day.clickable{cursor:pointer}
 .day.clickable:hover{background:#f4f7f1}
 .dnum{font-size:13px;font-weight:600}
 .today .dnum{background:var(--green);color:#fff;border-radius:999px;padding:1px 7px}
 .free{position:absolute;right:5px;bottom:3px;font-size:11px;color:var(--dim)}
 
+/* 카드는 열 너비를 넘지 않는다. 전체 제목은 title 속성(마우스)과 상세 패널에서 본다. */
 .card{margin-top:3px;padding:2px 5px;border-radius:5px;font-size:11.5px;line-height:1.35;
-  color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
+  display:flex;align-items:center;gap:3px}
+.card .card-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.card .mark{flex:none;font-size:10px}
+/* 담당이 여러 명일 때 카드 끝에 나머지 사람의 색을 점으로 남긴다 */
+.card .co-dot{display:inline-block;width:6px;height:6px;border-radius:50%;flex:none;
+  border:1px solid rgba(255,255,255,.7)}
 .card.block{background:var(--dim);color:#fff;
   background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.28) 0 4px,transparent 4px 8px)}
 .card.clash{outline:2px solid var(--red);outline-offset:-2px}
@@ -215,8 +225,9 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         <h2>방 이름</h2>
         <input type="text" id="room-name" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px">
         <h2 style="margin-top:18px">선생님 명단</h2>
+        <p class="note-line" style="margin:0 0 8px">선생님 휴대폰 뒷자리 4자리가 그분의 입장 코드가 됩니다. 사이트 주소와 함께 알려 주세요.</p>
         <table>
-          <thead><tr><th style="width:22%">이름</th><th style="width:12%">반</th><th style="width:20%">뒷자리(4~6자리)</th><th style="width:10%">색</th><th style="width:22%">조율 등급</th><th></th></tr></thead>
+          <thead><tr><th style="width:22%">이름</th><th style="width:12%">반</th><th style="width:20%">뒷자리 4자리(겹치면 6자리)</th><th style="width:10%">색</th><th style="width:22%">조율 등급</th><th></th></tr></thead>
           <tbody id="tea-body"></tbody>
         </table>
         <div class="setup-acts">
@@ -256,6 +267,7 @@ async function api(method, url, body) {
   if (!res.ok) {
     var err = new Error((data && data.error) || ('요청이 실패했어요 (' + res.status + ')'));
     err.status = res.status;
+    err.body = data;              // 어느 줄이 문제인지(row) 같은 것이 여기 담겨 온다
     throw err;
   }
   return data;
@@ -300,9 +312,37 @@ function nameOf(id) {
   var t = teacherOf(id);
   return t ? (t.name || '이름 없음') : '(삭제된 선생님)';
 }
+// 카드에 이름으로 적을 담당 — 담당자(나)는 이름 대신 👤 표식으로 말한다.
+function cardTeachers(p) {
+  return (p.teacherIds || []).filter(function (id) { return id !== 'master'; });
+}
+// 카드 배경 = 첫 담당 선생님 색. 담당이 나뿐이면 내 색.
 function colorOf(p) {
-  var t = teacherOf((p.teacherIds || [])[0]);
+  var ids = cardTeachers(p);
+  var t = teacherOf(ids.length ? ids[0] : 'master');
   return t ? t.color : '#8a8f85';
+}
+function masterJoins(p) { return (p.teacherIds || []).indexOf('master') >= 0; }
+
+// 카드 글자와 표식을 만드는 순수 함수. 화면 밖에서도 그대로 부를 수 있게
+// S 를 건드리지 않고 이름 찾기 함수를 받는다(검증에서 이 함수를 직접 부른다).
+function programCardParts(pr, role, nameFn) {
+  var ids = (pr.teacherIds || []).filter(function (id) { return id !== 'master'; });
+  var prefix = (role === 'master' && ids.length) ? ids.map(nameFn).join('·') + ' · ' : '';
+  var marks = [];
+  if (role === 'master' && (pr.teacherIds || []).indexOf('master') >= 0) marks.push('👤');
+  if (pr.visibility === 'all') marks.push('전체 공개');
+  return { text: pr.start + ' ' + prefix + pr.title, marks: marks };
+}
+
+// 선생님 색 팔레트(lib/store.js 와 같은 순서). 아직 안 쓴 색부터 준다.
+var PALETTE = ['#2f855a', '#2b6cb0', '#b7791f', '#9b2c2c', '#553c9a', '#0f766e', '#a15c07', '#9d174d'];
+function pickColor(usedColors) {
+  var used = usedColors || [];
+  for (var i = 0; i < PALETTE.length; i++) {
+    if (used.indexOf(PALETTE[i]) < 0) return PALETTE[i];
+  }
+  return PALETTE[used.length % PALETTE.length];   // 팔레트를 다 썼을 때만 순환
 }
 
 // 겹침: 수업 날짜와 그 수업 담당 선생님의 '안 되는 날' 이 같은 날인가.
@@ -459,18 +499,32 @@ function dayCell(dateObj, monthNo) {
   cell.appendChild(el('div', 'dnum', String(dateObj.getDate())));
 
   S.programs.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (pr) {
-    var label = pr.start + ' ' + (S.role === 'master' && (pr.teacherIds || []).length
-      ? nameOf(pr.teacherIds[0]) + ' · ' : '') + pr.title;
-    var c = el('div', 'card', label);
+    var parts = programCardParts(pr, S.role, nameOf);
+    var c = el('div', 'card');
     c.style.background = colorOf(pr);
+    c.title = parts.text;                       // 잘린 제목은 마우스로 확인
+    c.appendChild(el('span', 'card-text', parts.text));
+    // 담당이 2명 이상이면 나머지 사람의 색을 순서대로 점으로 남긴다
+    var co = cardTeachers(pr).slice(1);
+    co.forEach(function (id) {
+      var t = teacherOf(id);
+      var dot = el('span', 'co-dot');
+      dot.style.background = t ? t.color : '#8a8f85';
+      dot.title = nameOf(id);
+      c.appendChild(dot);
+    });
+    parts.marks.forEach(function (m) {
+      c.appendChild(el('span', m === '전체 공개' ? 'mark tag-all' : 'mark', m));
+    });
     if (programClashes(pr)) c.classList.add('clash');
-    if (pr.visibility === 'all') c.appendChild(el('span', 'tag-all', '전체 공개'));
     cell.appendChild(c);
   });
 
   S.blocks.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (bl) {
     var label = (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + bl.title;
-    var c = el('div', 'card block', label);
+    var c = el('div', 'card block');
+    c.title = label;
+    c.appendChild(el('span', 'card-text', label));
     if (blockClashes(bl)) c.classList.add('clash');
     cell.appendChild(c);
   });
@@ -558,10 +612,18 @@ function renderPanel() {
   prs.forEach(function (pr) {
     var r = el('div', 'row' + (programClashes(pr) ? ' clash' : ''));
     r.appendChild(el('div', 'ttl', pr.title));
-    var who = (pr.teacherIds || []).map(nameOf).join(', ') || '담당 미정';
-    r.appendChild(el('div', 'who', pr.start + '–' + pr.end + ' · ' + who +
-      (pr.visibility === 'all' ? ' · 전체 공개' : '')));
+    var ids = cardTeachers(pr);
+    var who = ids.length ? ids.map(nameOf).join(', ') : (masterJoins(pr) ? '' : '담당 미정');
+    var line = pr.start + '–' + pr.end + (who ? ' · ' + who : '');
+    if (masterJoins(pr)) line += ' · 나도 참석';
+    if (pr.visibility === 'all') line += ' · 전체 공개';
+    r.appendChild(el('div', 'who', line));
     if (pr.memo) r.appendChild(el('div', 'who', pr.memo));
+    // 내가 안 된다고 적어 둔 날인데 내가 참석하지 않는 수업이면, 겹침이 아니라는 것을
+    // 회색 한 줄로 알려 준다(빨간 상자는 담당 선생님과 겹칠 때만 쓴다).
+    if (S.role === 'master' && !masterJoins(pr) && blockedOn('master', ds)) {
+      r.appendChild(el('div', 'who', '이날 나는 안 되지만 수업은 담당 선생님이 진행합니다.'));
+    }
     if (S.role === 'master') {
       var edit = el('button', 'linkish', '고치기');
       edit.addEventListener('click', function () { openProgramForm(pr); });
@@ -681,21 +743,30 @@ function openProgramForm(pr) {
   var ordered = realTeachers().slice().sort(function (a, b) {
     return GRADES[gradeOf(a)].order - GRADES[gradeOf(b)].order;
   });
-  var self = S.teachers.filter(function (t) { return t.id === 'master'; });
-  self.concat(ordered).forEach(function (t) {
+  ordered.forEach(function (t) {
     var lab = el('label');
     var cb = el('input'); cb.type = 'checkbox'; cb.value = t.id;
     if (pr && (pr.teacherIds || []).indexOf(t.id) >= 0) cb.checked = true;
     boxes.push(cb);
     lab.appendChild(cb);
     lab.appendChild(document.createTextNode((t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : '')));
-    if (t.id !== 'master') {
-      lab.appendChild(gradeDot(t));
-      lab.appendChild(el('span', 'g-name', GRADES[gradeOf(t)].label));
-    }
+    lab.appendChild(gradeDot(t));
+    lab.appendChild(el('span', 'g-name', GRADES[gradeOf(t)].label));
     checks.appendChild(lab);
   });
   f.appendChild(checks);
+
+  // 담당자 자신은 담당 목록이 아니라 이 칸으로 넣는다. 저장되는 값은 예전과 같다 —
+  // 켜면 teacherIds 에 'master' 가 들어가고, 그래야 내 안 되는 날과 겹치는지 본다.
+  var join = el('div', 'vis');
+  var joinLab = el('label');
+  var joinCb = el('input'); joinCb.type = 'checkbox';
+  if (pr && (pr.teacherIds || []).indexOf('master') >= 0) joinCb.checked = true;
+  joinLab.appendChild(joinCb);
+  joinLab.appendChild(document.createTextNode('나도 참석해야 하는 수업'));
+  join.appendChild(joinLab);
+  join.appendChild(el('div', 'hint', '켜면 내 안 되는 날과 겹치는지 확인합니다'));
+  f.appendChild(join);
 
   var vis = el('div', 'vis');
   var visLab = el('label');
@@ -718,6 +789,7 @@ function openProgramForm(pr) {
     msg.className = 'formmsg';
     msg.textContent = '';
     var picked = boxes.filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+    if (joinCb.checked) picked.push('master');
     var ds = [].slice.call(dates.querySelectorAll('input')).map(function (i) { return i.value; }).filter(Boolean);
     var body = {
       title: title.value, start: st.value, end: en.value,
@@ -812,7 +884,7 @@ async function renderSetup() {
     $('setup-msg').textContent = '설정을 불러오지 못했어요: ' + e.message;
   }
 }
-function drawTeacherRows(dupIds) {
+function drawTeacherRows(dupIds, errRow, errMsg) {
   var body = $('tea-body');
   body.innerHTML = '';
   setupRows.forEach(function (t, idx) {
@@ -820,28 +892,33 @@ function drawTeacherRows(dupIds) {
 
     var td1 = el('td');
     var name = el('input'); name.type = 'text'; name.value = t.name;
+    name.placeholder = '김민주';
     name.addEventListener('input', function () { t.name = name.value; });
     td1.appendChild(name);
-    if (t.id === 'master') td1.appendChild(el('div', 'who', '담당자(나) · 뒷자리는 환경변수'));
+    if (t.id === 'master') td1.appendChild(el('div', 'who', '담당자(나)'));
     tr.appendChild(td1);
 
     var td2 = el('td');
     var cls = el('input'); cls.type = 'text'; cls.value = t.cls;
+    cls.placeholder = '3-1';
     cls.addEventListener('input', function () { t.cls = cls.value; });
     td2.appendChild(cls);
     tr.appendChild(td2);
 
     var td3 = el('td');
     if (t.id === 'master') {
-      td3.appendChild(el('span', 'who', 'MASTER_CODE'));
+      td3.appendChild(el('span', 'who', '배포 설정에서 정함'));
     } else {
       var code = el('input'); code.type = 'text'; code.value = t.code || '';
-      code.inputMode = 'numeric'; code.maxLength = 6;
-      code.addEventListener('input', function () { t.code = code.value.replace(/\D/g, '').slice(0, 6); });
+      code.inputMode = 'numeric'; code.maxLength = 6; code.placeholder = '0000';
+      // 여기서는 자릿수를 자르지 않는다. 숫자만 남기고, 4자리·6자리 판정은 저장할 때
+      // 서버가 하고 그 줄에 이유를 적어 준다.
+      code.addEventListener('input', function () { t.code = code.value.replace(/\D/g, ''); });
       td3.appendChild(code);
-      if (dupIds.indexOf(t.id) >= 0) {
+      if ((dupIds || []).indexOf(t.id) >= 0) {
         td3.appendChild(el('div', 'warn-cell', '뒷자리가 같은 선생님이 있어요. 두 분은 6자리로 등록해 주세요.'));
       }
+      if (errRow === idx && errMsg) td3.appendChild(el('div', 'warn-cell', errMsg));
     }
     tr.appendChild(td3);
 
@@ -883,7 +960,9 @@ function drawTeacherRows(dupIds) {
   });
 }
 $('tea-add').addEventListener('click', function () {
-  setupRows.push({ id: '', name: '', cls: '', code: '', color: '#2b6cb0' });
+  // 아직 안 쓴 팔레트 색부터 준다 — 연달아 추가해도 같은 색이 겹치지 않는다
+  var used = setupRows.map(function (r) { return r.color; }).filter(Boolean);
+  setupRows.push({ id: '', name: '', cls: '', code: '', color: pickColor(used), grade: 'unknown' });
   drawTeacherRows([]);
 });
 $('setup-save').addEventListener('click', async function () {
@@ -901,8 +980,14 @@ $('setup-save').addEventListener('click', async function () {
       ? '저장했어요. 뒷자리가 겹치는 분이 있으니 표시된 줄을 6자리로 바꿔 주세요.'
       : '저장했어요.';
   } catch (e) {
+    // 어느 줄이 문제인지 서버가 짚어 주면 그 줄 아래에 빨간 글씨로 붙인다.
+    // 이때는 성공 문구를 절대 띄우지 않는다 — 저장되지 않았기 때문이다.
+    var row = e.body && typeof e.body.row === 'number' ? e.body.row : -1;
+    drawTeacherRows([], row, row >= 0 ? e.message : null);
     msg.className = 'formmsg bad';
-    msg.textContent = '저장하지 못했어요: ' + e.message + ' 값을 확인하고 다시 눌러 주세요.';
+    msg.textContent = row >= 0
+      ? '저장하지 못했어요. 표시된 줄을 고쳐 주세요.'
+      : '저장하지 못했어요: ' + e.message + ' 값을 확인하고 다시 눌러 주세요.';
   }
 });
 $('setup-export').addEventListener('click', function () {

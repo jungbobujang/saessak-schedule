@@ -23,8 +23,13 @@ if (!COOKIE_SECRET) {
   COOKIE_SECRET = crypto.randomBytes(32).toString('hex');
   console.warn('[경고] COOKIE_SECRET 이 없어 임시 열쇠를 만들었습니다 — 서버를 다시 켜면 모두 다시 로그인해야 합니다.');
 }
+// 입장 코드는 숫자만 받는 칸으로 들어온다. 그래서 MASTER_CODE 도 4~8자리 숫자여야
+// 어떤 입력으로든 일치할 수 있다. 값이 어긋나도 서버는 뜨되(다른 기능은 멀쩡하다) 경고를 남긴다.
+var MASTER_CODE_VALID = /^\d{4,8}$/.test(MASTER_CODE);
 if (!MASTER_CODE) {
   console.warn('[경고] MASTER_CODE 가 설정되지 않았습니다 — 담당자(마스터)로는 로그인할 수 없습니다.');
+} else if (!MASTER_CODE_VALID) {
+  console.warn('[설정] 경고: MASTER_CODE 는 4~8자리 숫자여야 합니다. 현재 값으로는 마스터 로그인이 불가능합니다.');
 }
 
 // ===== 세션 (school-device-inspector 의 서명 쿠키 방식) =====
@@ -321,19 +326,41 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
   if (b.room && typeof b.room.name === 'string') d.room.name = clean(b.room.name, 60) || d.room.name;
 
   if (Array.isArray(b.teachers)) {
+    // 뒷자리는 자르지 않는다. 5자리를 4자리로 몰래 깎으면 그 선생님은 자기가 받은
+    // 번호로 들어오지 못하고, 왜 안 되는지도 알 수 없다. 어긋나면 그 줄을 짚어 되돌린다.
+    var bad = -1;
+    b.teachers.forEach(function (t, i) {
+      if (bad >= 0) return;
+      if (t && t.id === 'master') return;          // 담당자 코드는 배포 설정에서 정한다
+      var raw = String((t && t.code) || '').trim();
+      if (!/^\d{4}$|^\d{6}$/.test(raw)) bad = i;
+    });
+    if (bad >= 0) {
+      return res.status(400).json({ error: '뒷자리는 4자리 또는 6자리 숫자로 입력해 주세요.', row: bad });
+    }
+
     var seen = {};
     var next = [];
-    b.teachers.forEach(function (t, i) {
+    // 색은 '아직 안 쓴 팔레트 색' 부터 준다. 앞에서부터 채워 나가므로 같은 색이 겹치지 않는다.
+    var used = b.teachers.map(function (t) { return t && t.color; }).filter(Boolean);
+    function freeColor() {
+      for (var k = 0; k < store.PALETTE.length; k++) {
+        if (used.indexOf(store.PALETTE[k]) < 0) return store.PALETTE[k];
+      }
+      return store.PALETTE[used.length % store.PALETTE.length];
+    }
+    b.teachers.forEach(function (t) {
       var id = (t && t.id) || store.genId('t');
       if (seen[id]) return;             // 같은 id 가 두 번 오면 뒤엣것은 버린다
       seen[id] = true;
-      var code = String((t && t.code) || '').replace(/\D/g, '').slice(0, 6);
+      var color = (t && t.color) || freeColor();
+      if (used.indexOf(color) < 0) used.push(color);
       next.push({
         id: id,
         name: clean(t && t.name, 20),
         cls: clean(t && t.cls, 10),
-        code: id === 'master' ? '' : code,   // 마스터 코드는 환경변수라 파일에 두지 않는다
-        color: (t && t.color) || store.PALETTE[i % store.PALETTE.length],
+        code: id === 'master' ? '' : String((t && t.code) || '').trim(),
+        color: color,
         grade: store.normGrade(t && t.grade)
       });
     });
@@ -370,6 +397,7 @@ app.get('/api/health', function (req, res) {
     ok: !store.isDamaged(),
     dataPath: path.resolve(store.DATA_FILE),
     fileExists: store.fileExists(),
+    masterCodeValid: MASTER_CODE_VALID,
     // 담당자(master)는 명단에 늘 한 줄 있지만 '등록한 선생님' 수에는 넣지 않는다.
     // 이 숫자는 담당자가 몇 분을 등록했는지 확인하려고 보는 값이다.
     teachers: d.room.teachers.filter(function (t) { return t.id !== 'master'; }).length,
