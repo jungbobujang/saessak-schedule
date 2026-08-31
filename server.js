@@ -12,6 +12,8 @@ var crypto = require('crypto');
 var fs = require('fs');
 var path = require('path');
 var store = require('./lib/store');
+// 시간대·겹침 규칙은 화면과 같은 파일을 쓴다 (public 아래라 브라우저도 같은 것을 읽는다)
+var Slots = require('./public/shared/slots.js');
 
 var PORT = process.env.PORT || 3000;
 var MASTER_CODE = String(process.env.MASTER_CODE || '').trim();
@@ -284,6 +286,13 @@ app.post('/api/blocks', requireAuth, function (req, res) {
   if (req.session.role !== 'master' && target !== req.session.teacherId) {
     return res.status(403).json({ error: '내 것만 적을 수 있어요.' });
   }
+  // 시간대는 빠져 있으면 종일. 엉뚱한 값이면 조용히 종일로 바꾸지 않고 되돌린다 —
+  // 오전만 안 된다고 적었는데 종일로 저장되면 그 선생님의 하루가 통째로 막힌다.
+  var slot = (b.slot === undefined || b.slot === null || b.slot === '') ? 'all' : b.slot;
+  if (!Slots.isSlot(slot)) {
+    return res.status(400).json({ error: '시간대는 종일·오전·오후 중에서 골라 주세요.' });
+  }
+
   var d = store.load();
   if (!d.room.teachers.some(function (t) { return t.id === target; })) {
     return res.status(400).json({ error: '명단에 없는 선생님이에요.' });
@@ -292,7 +301,8 @@ app.post('/api/blocks', requireAuth, function (req, res) {
     id: store.genId('b'),
     date: b.date,
     teacherId: target,
-    title: clean(b.title, 40) || '안 돼요',
+    slot: slot,
+    memo: clean(b.memo, 100),   // 빈 값이어도 된다. 이유를 요구하지 않는다.
     updatedAt: nowIso()
   };
   d.blocks.push(made);

@@ -139,6 +139,11 @@ button:hover{background:#eef1ea}
 .vis{margin-top:12px;border:1px solid var(--line);border-radius:9px;padding:9px}
 .vis label{display:flex;align-items:center;gap:7px;color:var(--ink);margin:0;font-size:13.5px;cursor:pointer}
 .vis .hint{font-size:12px;color:var(--dim);margin:4px 0 0 24px}
+.slotpick{display:flex;gap:6px}
+.slotpick .slot-btn{flex:1;padding:8px 0}
+.slotpick .slot-btn.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+.slotpick .slot-btn.on:hover{background:#276749}
+.checks .when{color:var(--dim);font-size:12px;margin-left:4px}
 .formmsg{margin-top:10px;font-size:13px;min-height:18px}
 .formmsg.bad{color:var(--red)}
 .formmsg.good{color:var(--green)}
@@ -243,6 +248,8 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
   </div>
 </section>
 
+<!-- 시간대·겹침 규칙. 서버(server.js)가 require 하는 바로 그 파일이다. -->
+<script src="/shared/slots.js"></script>
 <script>
 'use strict';
 // ── 아주 작은 도구들 ─────────────────────────────────
@@ -345,13 +352,16 @@ function pickColor(usedColors) {
   return PALETTE[used.length % PALETTE.length];   // 팔레트를 다 썼을 때만 순환
 }
 
-// 겹침: 수업 날짜와 그 수업 담당 선생님의 '안 되는 날' 이 같은 날인가.
+// 겹침: 같은 날, 그 수업 담당인 사람의 '안 되는 날' 이고, 시간대까지 부딪히는가.
+// 시간대 판정은 서버와 같은 파일(Slots)을 쓴다.
 function clashesOn(date) {
   var bs = S.blocks.filter(function (b) { return b.date === date; });
   var out = [];
   S.programs.filter(function (p) { return p.date === date; }).forEach(function (p) {
     bs.forEach(function (b) {
-      if ((p.teacherIds || []).indexOf(b.teacherId) >= 0) out.push({ program: p, block: b });
+      if ((p.teacherIds || []).indexOf(b.teacherId) < 0) return;
+      if (!Slots.blockHitsProgram(b, p)) return;
+      out.push({ program: p, block: b });
     });
   });
   return out;
@@ -521,7 +531,7 @@ function dayCell(dateObj, monthNo) {
   });
 
   S.blocks.filter(function (x) { return x.date === ds && visible(x); }).forEach(function (bl) {
-    var label = (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + bl.title;
+    var label = (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + Slots.blockCardText(bl);
     var c = el('div', 'card block');
     c.title = label;
     c.appendChild(el('span', 'card-text', label));
@@ -535,7 +545,8 @@ function dayCell(dateObj, monthNo) {
   if (S.role === 'master' && dow !== 0 && dow !== 6) {
     var pool = realTeachers();
     if (pool.length > 0) {
-      var free = pool.filter(function (t) { return !blockedOn(t.id, ds); }).length;
+      // 오전만·오후만 안 되는 분은 '가능' 으로 센다. 종일이거나 오전+오후 둘 다면 불가.
+      var free = pool.filter(function (t) { return statusOf(t.id, ds).free; }).length;
       cell.appendChild(el('div', 'free', '가능 ' + free + '/' + pool.length));
     }
   }
@@ -544,10 +555,12 @@ function dayCell(dateObj, monthNo) {
   return cell;
 }
 
-// 그날 '안 되는 날' 을 적었는가. 수업 유무는 가능 여부와 상관없다.
-function blockedOn(teacherId, ds) {
-  return S.blocks.filter(function (b) { return b.date === ds && b.teacherId === teacherId; })[0] || null;
+// 그 사람이 그날 적어 둔 '안 되는 날' 들. 수업 유무는 가능 여부와 상관없다.
+function blocksOf(teacherId, ds) {
+  return S.blocks.filter(function (b) { return b.date === ds && b.teacherId === teacherId; });
 }
+function blockedOn(teacherId, ds) { return blocksOf(teacherId, ds)[0] || null; }
+function statusOf(teacherId, ds) { return Slots.dayStatus(blocksOf(teacherId, ds)); }
 function programCountOn(teacherId, ds) {
   return S.programs.filter(function (p) {
     return p.date === ds && (p.teacherIds || []).indexOf(teacherId) >= 0;
@@ -635,8 +648,8 @@ function renderPanel() {
 
   bls.forEach(function (bl) {
     var r = el('div', 'row' + (blockClashes(bl) ? ' clash' : ''));
-    r.appendChild(el('div', 'ttl', bl.title));
-    r.appendChild(el('div', 'who', nameOf(bl.teacherId) + ' · 안 되는 날'));
+    r.appendChild(el('div', 'ttl', Slots.memoOf(bl) || Slots.EMPTY_MEMO));
+    r.appendChild(el('div', 'who', (S.role === 'master' ? nameOf(bl.teacherId) + ' · ' : '') + Slots.slotLabel(bl)));
     if (S.role === 'master' || bl.teacherId === S.me.id) {
       var del = el('button', 'linkish', '지우기');
       del.addEventListener('click', async function () {
@@ -662,12 +675,14 @@ function renderPanel() {
         left.appendChild(gradeDot(t));
         li.appendChild(left);
 
-        var blk = blockedOn(t.id, ds);
-        if (blk) {
-          li.appendChild(el('span', 'no', blk.title));
+        var st = statusOf(t.id, ds);
+        if (!st.free) {
+          // 종일(또는 오전+오후) 안 되는 날 — 적어 둔 메모가 있으면 그것을 보여 준다
+          var memo = blocksOf(t.id, ds).map(Slots.memoOf).filter(Boolean)[0];
+          li.appendChild(el('span', 'no', memo || Slots.EMPTY_MEMO));
         } else {
-          // 수업이 있어도 '가능' 이다. 몇 건인지는 회색 보조 문구로만 덧붙인다.
-          var right = el('span', 'ok', '가능');
+          // 수업이 있어도 '가능' 이다. 반나절만 막힌 것도 가능으로 세되 어느 쪽인지 적는다.
+          var right = el('span', 'ok', st.availLabel || '가능');
           var n = programCountOn(t.id, ds);
           if (n > 0) right.appendChild(el('span', 'sub', '· 수업 ' + n + '건 있음'));
           li.appendChild(right);
@@ -743,6 +758,7 @@ function openProgramForm(pr) {
   var ordered = realTeachers().slice().sort(function (a, b) {
     return GRADES[gradeOf(a)].order - GRADES[gradeOf(b)].order;
   });
+  var whenSpans = [];   // 폼의 날짜가 바뀌면 이 자리들만 다시 적는다
   ordered.forEach(function (t) {
     var lab = el('label');
     var cb = el('input'); cb.type = 'checkbox'; cb.value = t.id;
@@ -752,9 +768,23 @@ function openProgramForm(pr) {
     lab.appendChild(document.createTextNode((t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : '')));
     lab.appendChild(gradeDot(t));
     lab.appendChild(el('span', 'g-name', GRADES[gradeOf(t)].label));
+    var when = el('span', 'when');
+    whenSpans.push({ id: t.id, node: when });
+    lab.appendChild(when);
     checks.appendChild(lab);
   });
   f.appendChild(checks);
+
+  // 그 날짜에 이미 안 된다고 적어 둔 분을 이름 옆에 회색으로 알려 준다
+  function refreshWhen() {
+    var first = dates.querySelector('input');
+    var ds = first && first.value;
+    whenSpans.forEach(function (x) {
+      x.node.textContent = ds ? statusOf(x.id, ds).formLabel : '';
+    });
+  }
+  dates.addEventListener('change', refreshWhen);
+  refreshWhen();
 
   // 담당자 자신은 담당 목록이 아니라 이 칸으로 넣는다. 저장되는 값은 예전과 같다 —
   // 켜면 teacherIds 에 'master' 가 들어가고, 그래야 내 안 되는 날과 겹치는지 본다.
@@ -833,17 +863,34 @@ function openBlockForm() {
   S.formOpen = true;
   var box = $('panel');
   box.innerHTML = '';
-  box.appendChild(el('h2', null, '안 되는 날'));
+  box.appendChild(el('h2', null, '이날 안 돼요'));
   var f = el('div', 'form');
-
-  f.appendChild(el('label', null, '어떤 일인가요'));
-  var title = el('input'); title.type = 'text'; title.value = '안 돼요';
-  title.placeholder = '연수 / 출장 / 학년 행사 …';
-  f.appendChild(title);
 
   f.appendChild(el('label', null, '날짜'));
   var d = el('input'); d.type = 'date'; d.value = S.pick;
   f.appendChild(d);
+
+  // 시간대는 버튼 셋 중 하나. 기본은 종일이고, 고른 것만 진하게 남는다.
+  f.appendChild(el('label', null, '시간대'));
+  var slot = 'all';
+  var slotBox = el('div', 'slotpick');
+  var slotBtns = {};
+  ['all', 'am', 'pm'].forEach(function (key) {
+    var b = el('button', 'slot-btn' + (key === slot ? ' on' : ''), Slots.LABEL[key]);
+    b.addEventListener('click', function () {
+      slot = key;
+      Object.keys(slotBtns).forEach(function (k) { slotBtns[k].classList.toggle('on', k === key); });
+    });
+    slotBtns[key] = b;
+    slotBox.appendChild(b);
+  });
+  f.appendChild(slotBox);
+
+  // 이유는 묻지 않는다. 적고 싶은 사람만 적는다.
+  f.appendChild(el('label', null, '메모'));
+  var memo = el('input'); memo.type = 'text';
+  memo.placeholder = '메모 (선택) 예: 새싹 연수, 선약';
+  f.appendChild(memo);
 
   var msg = el('div', 'formmsg');
   var acts = el('div', 'acts');
@@ -852,7 +899,7 @@ function openBlockForm() {
     save.disabled = true;
     msg.className = 'formmsg'; msg.textContent = '';
     try {
-      await api('POST', '/api/blocks', { date: d.value, title: title.value });
+      await api('POST', '/api/blocks', { date: d.value, slot: slot, memo: memo.value });
       closeForm();
       await refresh();
     } catch (e) {
