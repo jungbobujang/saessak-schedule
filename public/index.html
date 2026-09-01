@@ -241,6 +241,31 @@ td input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--lin
 .card .co-more{opacity:.85}
 td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer}
 
+/* ── 프로그램 화면 ─────────────────────────── */
+#view-programs .wrap{display:block}
+.cnt{font-size:12.5px;color:var(--dim);font-weight:400;margin-left:6px}
+/* 예정 한 줄 — 체크·제목·오른쪽 단추. 제목이 길면 접히고 단추는 자리를 지킨다. */
+.plan{display:flex;align-items:flex-start;gap:9px;padding:9px;border:1px solid var(--line);
+  border-radius:9px;margin-bottom:8px}
+.plan .mid{flex:1;min-width:0}
+.plan .ttl{font-weight:600;word-break:keep-all;overflow-wrap:anywhere}
+.plan.done .ttl{color:var(--dim);font-weight:400}
+.plan .sub{font-size:12.5px;color:var(--dim);margin-top:2px;word-break:keep-all;overflow-wrap:anywhere}
+.plan .sub .due{color:var(--red)}
+.plan input[type=checkbox]{margin:4px 0 0;width:17px;height:17px;flex:none}
+.plan .tag{background:#eef1ea;border-radius:999px;padding:1px 8px;font-size:11.5px;color:#3f4a3a;margin-left:6px;white-space:nowrap}
+.plan .rowacts{margin-top:0;flex:none}
+/* 맨 아래 추가 줄 */
+.planadd{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.planadd input[type=text]{flex:1;min-width:130px;padding:8px;border:1px solid var(--line);border-radius:8px}
+.planadd select{padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+/* 잡힌 것 표 — 날짜는 알약으로 늘어놓는다 */
+.pills{display:flex;flex-wrap:wrap;gap:5px}
+.pill{border-radius:999px;padding:2px 9px;font-size:12.5px;border:1px solid var(--line);background:#fff}
+.pill.past{opacity:.45}
+.wholist{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.wholist .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+
 /* ── 좁은 화면(≤720px) ─────────────────────── */
 @media (max-width:720px){
   .wrap{display:block;padding:12px}
@@ -267,6 +292,9 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
   .acts button{width:100%;min-height:44px}
   .rowacts{flex-direction:row}
   .rowacts button{min-height:36px}
+  .plan{flex-wrap:wrap}
+  .plan .rowacts{width:100%}
+  .planadd input[type=text]{min-height:44px}
 }
 .top-more{display:none}
 .warn-cell{color:var(--red);font-size:12px}
@@ -293,6 +321,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
     <span class="badge" id="cal-me"></span>
     <button class="top-more" id="top-more" aria-label="메뉴 열기">⋯</button>
     <span class="top-actions" id="top-actions">
+      <button class="linkish side-door hide" id="go-programs">프로그램</button>
       <button class="linkish side-door hide" id="go-setup">설정</button>
       <button id="cal-out">나가기</button>
     </span>
@@ -387,6 +416,29 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
           <input type="file" id="setup-file" accept="application/json" class="hide">
         </div>
         <div class="formmsg" id="setup-msg"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ 프로그램(마스터 전용) ═══════════════════ -->
+<section id="view-programs" class="hide">
+  <div class="top">
+    <h1>🌱 프로그램</h1>
+    <button class="linkish side-door" id="pg-back">달력으로</button>
+    <button id="pg-out">나가기</button>
+  </div>
+  <div class="wrap">
+    <div class="left">
+      <div class="panel">
+        <h2>아직 안 잡은 것 <span class="cnt" id="pg-plan-cnt"></span></h2>
+        <div id="pg-plans"></div>
+        <div id="pg-add"></div>
+        <div class="formmsg" id="pg-msg"></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2>달력에 잡힌 것 <span class="cnt" id="pg-sum-cnt"></span></h2>
+        <div id="pg-summary"></div>
       </div>
     </div>
   </div>
@@ -604,7 +656,7 @@ function visible(item) {
 
 // ── 라우팅 ───────────────────────────────────────────
 function show(name) {
-  ['login', 'cal', 'setup'].forEach(function (v) {
+  ['login', 'cal', 'setup', 'programs'].forEach(function (v) {
     $('view-' + v).classList.toggle('hide', v !== name);
   });
 }
@@ -614,9 +666,17 @@ async function route() {
     if (S.role !== 'master') { location.hash = '#cal'; return; }
     show('setup'); renderSetup(); return;
   }
+  if (h === 'programs') {
+    if (S.role !== 'master') { location.hash = '#cal'; return; }
+    show('programs'); await renderPrograms(); return;
+  }
   if (h === 'cal') {
     if (!S.role) { location.hash = '#login'; return; }
-    show('cal'); await refresh(); return;
+    show('cal');
+    await refresh();
+    // 프로그램 화면에서 [달력에 잡기] 로 넘어온 길 — 그 예정을 채운 배정 폼을 바로 연다
+    if (pendingPlan) { var pp = pendingPlan; pendingPlan = null; openProgramForm(null, pp); }
+    return;
   }
   show('login');
   $('login-code').focus();   // 들어오자마자 바로 칠 수 있게
@@ -697,7 +757,10 @@ $('top-more').addEventListener('click', function (e) {
 });
 document.addEventListener('click', function () { $('top-actions').classList.remove('open'); });
 $('go-setup').addEventListener('click', function () { location.hash = '#setup'; });
+$('go-programs').addEventListener('click', function () { location.hash = '#programs'; });
 $('back-cal').addEventListener('click', function () { location.hash = '#cal'; });
+$('pg-back').addEventListener('click', function () { location.hash = '#cal'; });
+$('pg-out').addEventListener('click', logout);
 
 // ── 달력 ─────────────────────────────────────────────
 $('mo-prev').addEventListener('click', function () { moveMonth(-1); });
@@ -767,6 +830,7 @@ function renderCal() {
   $('cal-room').textContent = S.room.name || '디지털새싹 일정판';
   $('cal-me').textContent = (S.me.name || '') + (S.me.cls ? ' · ' + S.me.cls : '');
   $('go-setup').classList.toggle('hide', S.role !== 'master');
+  $('go-programs').classList.toggle('hide', S.role !== 'master');
   $('teacher-note').classList.toggle('hide', S.role === 'master');
   $('legend-grade').classList.toggle('hide', S.role !== 'master');
 
@@ -1172,17 +1236,22 @@ function renderPanel() {
 }
 
 // ── 수업 배정 폼(마스터) ─────────────────────────────
-function openProgramForm(pr) {
+// plan 은 프로그램 화면에서 [달력에 잡기] 로 넘어온 예정이다. 제목·희망 선생님을
+// 채워 두고 planId 를 숨겨 들고 간다 — 저장되면 그 예정은 '잡힌 것' 이 된다.
+function openProgramForm(pr, plan) {
   if (S.role !== 'master') return;   // 담당자 시점 폼이다. 다른 길로도 열리지 않게 여기서 막는다.
   S.formOpen = true; S.editing = pr;
+  var wish = (plan && plan.teacherIds) || [];
   var box = panelBox();
   box.innerHTML = '';
   box.appendChild(el('h2', null, pr ? '수업 고치기' : '수업 배정'));
 
   var f = el('div', 'form');
+  if (plan) f.appendChild(el('div', 'pickhint', '"' + plan.title + '" 을(를) 달력에 잡습니다.'));
 
   f.appendChild(el('label', null, '제목'));
-  var title = el('input'); title.type = 'text'; title.value = pr ? pr.title : '디지털새싹 수업';
+  var title = el('input'); title.type = 'text';
+  title.value = pr ? pr.title : (plan ? plan.title : '디지털새싹 수업');
   f.appendChild(title);
 
   f.appendChild(el('label', null, '날짜'));
@@ -1229,6 +1298,7 @@ function openProgramForm(pr) {
     var lab = el('label');
     var cb = el('input'); cb.type = 'checkbox'; cb.value = t.id;
     if (pr && (pr.teacherIds || []).indexOf(t.id) >= 0) cb.checked = true;
+    if (!pr && wish.indexOf(t.id) >= 0) cb.checked = true;
     boxes.push(cb);
     lab.appendChild(cb);
     lab.appendChild(document.createTextNode((t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : '')));
@@ -1274,6 +1344,7 @@ function openProgramForm(pr) {
   var joinLab = el('label');
   var joinCb = el('input'); joinCb.type = 'checkbox';
   if (pr && (pr.teacherIds || []).indexOf('master') >= 0) joinCb.checked = true;
+  if (!pr && wish.indexOf('master') >= 0) joinCb.checked = true;
   joinLab.appendChild(joinCb);
   joinLab.appendChild(document.createTextNode('나도 참석해야 하는 수업'));
   join.appendChild(joinLab);
@@ -1310,7 +1381,11 @@ function openProgramForm(pr) {
     save.disabled = true;
     try {
       if (pr) { body.date = ds[0]; await api('PUT', '/api/programs/' + pr.id, body); }
-      else { body.dates = ds; await api('POST', '/api/programs', body); }
+      else {
+        body.dates = ds;
+        if (plan) body.planId = plan.planId;
+        await api('POST', '/api/programs', body);
+      }
       closeForm();
       await refresh();
       toast('저장했어요');
@@ -1433,6 +1508,280 @@ function openBlockForm(bl) {
   box.appendChild(f);
 }
 function closeForm() { S.formOpen = false; S.editing = null; }
+
+// ── 프로그램 화면(마스터 전용) ───────────────────────
+// '잡혔는가' 는 어디에도 저장하지 않는다. planId 를 가진 수업이 하나라도 있으면
+// 잡힌 것이다 — 두 군데에 같은 사실을 적어 두면 반드시 어긋난다.
+var PG = { plans: [], programs: [] };
+var pendingPlan = null;      // [달력에 잡기] 로 달력까지 들고 가는 예정
+
+function bookedPlanIds(programs) {
+  var out = {};
+  (programs || []).forEach(function (p) { if (p.planId) out[p.planId] = true; });
+  return out;
+}
+// 구획 1 은 아직 안 잡은 것. 신청 안 한 것이 먼저, 그 안에서는 적은 차례대로.
+function openPlans(plans, programs) {
+  var booked = bookedPlanIds(programs);
+  return (plans || []).filter(function (pl) { return !booked[pl.id]; })
+    .map(function (pl, i) { return { pl: pl, i: i }; })
+    .sort(function (a, b) {
+      if (!!a.pl.applied !== !!b.pl.applied) return a.pl.applied ? 1 : -1;
+      return a.i - b.i;
+    })
+    .map(function (x) { return x.pl; });
+}
+// 둘째 줄 회색 글 — "희망 3-1 김솔지 · 메모"
+function planSubText(pl, teacherFn) {
+  var who = (pl.teacherIds || []).map(function (id) {
+    var t = teacherFn(id);
+    if (!t) return '(삭제된 선생님)';
+    return (t.cls ? t.cls + ' ' : '') + (t.name || '이름 없음');
+  }).join(', ');
+  var parts = [];
+  if (who) parts.push('희망 ' + who);
+  if (pl.memo) parts.push(pl.memo);
+  return parts.join(' · ');
+}
+// 메모에 '마감' 이 있으면 그 말만 빨갛게. 날짜를 놓치는 것이 여기서 제일 큰 사고다.
+function appendDueText(node, text) {
+  String(text || '').split(/(마감)/).forEach(function (piece) {
+    if (!piece) return;
+    if (piece === '마감') node.appendChild(el('span', 'due', piece));
+    else node.appendChild(document.createTextNode(piece));
+  });
+}
+// 구획 2 — 제목 + 담당 조합으로 묶는다. 같은 제목이라도 담당이 다르면 다른 줄이다.
+function groupPrograms(programs) {
+  var map = {}, order = [];
+  (programs || []).forEach(function (p) {
+    var ids = (p.teacherIds || []).slice().sort();
+    var key = (p.title || '') + '|' + ids.join(',');
+    if (!map[key]) {
+      map[key] = { key: key, title: p.title || '', teacherIds: ids, dates: [], programs: [], openCount: 0 };
+      order.push(key);
+    }
+    var g = map[key];
+    g.dates.push(p.date);
+    g.programs.push(p);
+    if (p.visibility === 'all') g.openCount++;
+  });
+  var rows = order.map(function (k) { return map[k]; });
+  rows.forEach(function (g) { g.dates.sort(); });
+  rows.sort(function (a, b) { return a.dates[0] < b.dates[0] ? -1 : (a.dates[0] > b.dates[0] ? 1 : 0); });
+  return rows;
+}
+// 공개 열 — 다 켠 것과 일부만 켠 것은 다른 사실이다. 뭉뚱그리지 않는다.
+function openLabel(g) {
+  if (g.openCount === 0) return '';
+  return g.openCount === g.programs.length ? '전체 공개' : '일부 공개';
+}
+
+async function renderPrograms() {
+  var msg = $('pg-msg');
+  msg.className = 'formmsg'; msg.textContent = '';
+  try {
+    // 여기서는 이번 달이 아니라 전체를 본다 — 프로그램 요약은 달에 매이지 않는다
+    var d = await api('GET', '/api/data?month=all');
+    S.teachers = d.teachers;
+    S.room = d.room;
+    PG.plans = d.plans || [];
+    PG.programs = d.programs || [];
+  } catch (e) {
+    if (e.status === 401) { S.role = null; location.hash = '#login'; route(); return; }
+    msg.className = 'formmsg bad';
+    msg.textContent = '불러오지 못했어요: ' + e.message;
+    return;
+  }
+  drawPlans();
+  drawSummary();
+}
+
+function drawPlans() {
+  var box = $('pg-plans');
+  box.innerHTML = '';
+  var list = openPlans(PG.plans, PG.programs);
+  var applied = list.filter(function (pl) { return pl.applied; }).length;
+  $('pg-plan-cnt').textContent = list.length + '건 · 신청함 ' + applied;
+
+  if (!list.length) {
+    box.appendChild(el('div', 'empty', '신청하려는 프로그램을 여기 적어 두세요.'));
+  }
+  list.forEach(function (pl) {
+    var row = el('div', 'plan' + (pl.applied ? ' done' : ''));
+
+    var cb = el('input'); cb.type = 'checkbox'; cb.checked = !!pl.applied;
+    cb.title = '신청함';
+    cb.addEventListener('change', async function () {
+      cb.disabled = true;
+      try {
+        await api('PUT', '/api/plans/' + pl.id, { applied: cb.checked });
+        await renderPrograms();
+        toast(cb.checked ? '신청함으로 표시했어요' : '신청 표시를 지웠어요');
+      } catch (e) {
+        cb.checked = !cb.checked;
+        cb.disabled = false;
+        $('pg-msg').className = 'formmsg bad';
+        $('pg-msg').textContent = '바꾸지 못했어요: ' + e.message;
+      }
+    });
+    row.appendChild(cb);
+
+    var mid = el('div', 'mid');
+    var ttl = el('div', 'ttl');
+    ttl.appendChild(document.createTextNode(pl.title));
+    if (pl.applied) ttl.appendChild(el('span', 'tag', '신청함'));
+    mid.appendChild(ttl);
+    var subText = planSubText(pl, teacherOf);
+    if (subText) {
+      var sub = el('div', 'sub');
+      appendDueText(sub, subText);
+      mid.appendChild(sub);
+    }
+    row.appendChild(mid);
+
+    var acts = el('div', 'rowacts');
+    var book = el('button', 'btn-sm btn-main', '달력에 잡기');
+    book.addEventListener('click', function () {
+      pendingPlan = { planId: pl.id, title: pl.title, teacherIds: (pl.teacherIds || []).slice() };
+      location.hash = '#cal';
+    });
+    acts.appendChild(book);
+    var del = el('button', 'btn-sm btn-danger', '지우기');
+    del.addEventListener('click', async function () {
+      if (!window.confirm('"' + pl.title + '" 을(를) 목록에서 지울까요?')) return;
+      try {
+        await api('DELETE', '/api/plans/' + pl.id);
+        await renderPrograms();
+        toast('지웠어요');
+      } catch (e) {
+        $('pg-msg').className = 'formmsg bad';
+        $('pg-msg').textContent = e.message;
+      }
+    });
+    acts.appendChild(del);
+    row.appendChild(acts);
+
+    box.appendChild(row);
+  });
+
+  drawPlanAdd();
+}
+
+// 맨 아래 추가 줄 — 제목만 있으면 된다. 희망 선생님과 메모는 나중에 적어도 된다.
+function drawPlanAdd() {
+  var box = $('pg-add');
+  box.innerHTML = '';
+  var line = el('div', 'planadd');
+
+  var title = el('input'); title.type = 'text'; title.placeholder = '프로그램 이름';
+  var sel = el('select');
+  var op0 = el('option', null, '희망 선생님 (선택)'); op0.value = '';
+  sel.appendChild(op0);
+  realTeachers().forEach(function (t) {
+    var op = el('option', null, (t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : ''));
+    op.value = t.id;
+    sel.appendChild(op);
+  });
+  var memo = el('input'); memo.type = 'text'; memo.placeholder = '메모 (선택) 예: 9/12 마감';
+  var add = el('button', 'btn-main', '+ 추가');
+
+  async function submit() {
+    var name = title.value.trim();
+    var msg = $('pg-msg');
+    msg.className = 'formmsg'; msg.textContent = '';
+    if (!name) { msg.className = 'formmsg bad'; msg.textContent = '프로그램 이름을 적어 주세요.'; title.focus(); return; }
+    add.disabled = true;
+    try {
+      await api('POST', '/api/plans', {
+        title: name, teacherIds: sel.value ? [sel.value] : [], memo: memo.value
+      });
+      await renderPrograms();
+      $('pg-add').querySelector('input').focus();   // 연달아 적을 수 있게
+      toast('추가했어요');
+    } catch (e) {
+      add.disabled = false;
+      msg.className = 'formmsg bad';
+      msg.textContent = '추가하지 못했어요: ' + e.message;
+    }
+  }
+  add.addEventListener('click', submit);
+  [title, memo].forEach(function (i) {
+    i.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+  });
+
+  line.appendChild(title);
+  line.appendChild(sel);
+  line.appendChild(memo);
+  line.appendChild(add);
+  box.appendChild(line);
+}
+
+function drawSummary() {
+  var box = $('pg-summary');
+  box.innerHTML = '';
+  var rows = groupPrograms(PG.programs);
+  $('pg-sum-cnt').textContent = rows.length + '개 프로그램 · ' + PG.programs.length + '회차';
+  if (!rows.length) {
+    box.appendChild(el('div', 'empty', '아직 달력에 잡힌 수업이 없어요.'));
+    return;
+  }
+  var table = el('table');
+  var thead = el('thead');
+  var htr = el('tr');
+  [['프로그램', '30%'], ['담당', '24%'], ['날짜', ''], ['공개', '12%']].forEach(function (h) {
+    var th = el('th', null, h[0]);
+    if (h[1]) th.style.width = h[1];
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  var tbody = el('tbody');
+  rows.forEach(function (g) {
+    var tr = el('tr');
+    tr.appendChild(el('td', null, g.title));
+
+    var tdWho = el('td');
+    var who = el('div', 'wholist');
+    // 담당자 자신이 맨 앞 — 달력 카드와 같은 차례다
+    var ids = g.teacherIds.slice().sort(function (a, b) {
+      return (a === 'master' ? -1 : 0) - (b === 'master' ? -1 : 0);
+    });
+    if (!ids.length) who.appendChild(el('span', 'empty', '담당 미정'));
+    ids.forEach(function (id) {
+      var t = teacherOf(id);
+      var s = el('span');
+      var dot = el('span', 'dot');
+      dot.style.background = t ? t.color : '#8a8f85';
+      s.appendChild(dot);
+      s.appendChild(document.createTextNode(nameOf(id)));
+      who.appendChild(s);
+    });
+    tdWho.appendChild(who);
+    tr.appendChild(tdWho);
+
+    var tdDates = el('td');
+    var pills = el('div', 'pills');
+    g.dates.forEach(function (ds) {
+      var b = el('button', 'pill' + (ds < today() ? ' past' : ''), shortDate(ds));
+      b.title = ds + ' 달력에서 보기';
+      b.addEventListener('click', function () {
+        S.pick = ds;
+        S.month = ds.slice(0, 7);
+        location.hash = '#cal';
+      });
+      pills.appendChild(b);
+    });
+    tdDates.appendChild(pills);
+    tr.appendChild(tdDates);
+
+    tr.appendChild(el('td', null, openLabel(g)));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  box.appendChild(table);
+}
 
 // ── 설정 화면 ────────────────────────────────────────
 var setupRows = [];

@@ -106,7 +106,10 @@ function clean(s, max) { return String(s == null ? '' : s).trim().slice(0, max |
 function nowIso() { return new Date().toISOString(); }
 
 // 그 달 ±1주. 달을 넘나드는 주가 화면 격자에 함께 걸리므로 여유를 준다.
+// month=all 은 프로그램 화면처럼 '전체를 한 번에' 봐야 하는 곳에서 쓴다.
+// 범위만 넓어질 뿐 요청자 시점 필터(filterFor)는 그대로 걸린다.
 function monthRange(month) {
+  if (String(month || '') === 'all') return { from: '0000-01-01', to: '9999-12-31' };
   var m = /^(\d{4})-(\d{2})$/.exec(String(month || ''));
   var now = new Date();
   var y = m ? parseInt(m[1], 10) : now.getFullYear();
@@ -178,6 +181,11 @@ function filterFor(session, d, range) {
     var id = session.teacherId;
     programs = programs.filter(function (p) {
       return (p.teacherIds || []).indexOf(id) >= 0 || p.visibility === 'all';
+    }).map(function (p) {
+      // planId 는 담당자의 신청 관리용 값이다. 선생님 응답에는 담지 않는다.
+      var out = {};
+      Object.keys(p).forEach(function (k) { if (k !== 'planId') out[k] = p[k]; });
+      return out;
     });
     blocks = blocks.map(function (b) {
       return b.teacherId === id ? b : shareBlock(b);   // 내 것은 그대로, 남의 것은 걸러서
@@ -255,6 +263,19 @@ app.get('/api/data', requireAuth, function (req, res) {
   var range = monthRange(req.query.month);
   var v = filterFor(req.session, d, range);
   var me = d.room.teachers.filter(function (x) { return x.id === req.session.teacherId; })[0];
+  // 예정 목록은 담당자만 본다 — 선생님 응답에는 plans 라는 칸 자체가 없다.
+  if (req.session.role === 'master') {
+    return res.json({
+      role: req.session.role,
+      me: me ? { id: me.id, name: me.name, cls: me.cls, color: me.color } : { id: req.session.teacherId, name: '담당 선생님', cls: '' },
+      room: { name: d.room.name, schoolHolidays: d.room.schoolHolidays },
+      teachers: publicTeachers(req.session, d),
+      plans: d.room.plans,
+      programs: v.programs,
+      blocks: v.blocks,
+      range: range
+    });
+  }
   res.json({
     role: req.session.role,
     me: me ? { id: me.id, name: me.name, cls: me.cls, color: me.color } : { id: req.session.teacherId, name: '담당 선생님', cls: '' },
@@ -265,6 +286,72 @@ app.get('/api/data', requireAuth, function (req, res) {
     blocks: v.blocks,
     range: range
   });
+});
+
+// ===== 신청 예정 프로그램(plans) — 마스터 전용 =====
+// '잡혔는가' 는 저장하지 않는다. planId 를 가진 수업이 하나라도 있으면 잡힌 것이고,
+// 그 계산은 화면이 한다. 두 군데에 같은 사실을 적어 두면 반드시 어긋난다.
+function bookedPlanIds(d) {
+  var out = {};
+  d.programs.forEach(function (p) { if (p.planId) out[p.planId] = true; });
+  return out;
+}
+
+app.get('/api/plans', requireAuth, requireMaster, function (req, res) {
+  res.json({ plans: store.load().room.plans });
+});
+
+app.post('/api/plans', requireAuth, requireMaster, function (req, res) {
+  var b = req.body || {};
+  var title = clean(b.title, 80);
+  if (!title) return res.status(400).json({ error: '프로그램 이름을 적어 주세요.' });
+  var d = store.load();
+  var known = d.room.teachers.map(function (t) { return t.id; });
+  var made = {
+    id: store.genId('pl'),
+    title: title,
+    teacherIds: (Array.isArray(b.teacherIds) ? b.teacherIds : []).filter(function (id) { return known.indexOf(id) >= 0; }),
+    memo: clean(b.memo, 200),
+    applied: !!b.applied,
+    createdAt: nowIso()
+  };
+  d.room.plans.push(made);
+  store.save(d);
+  res.json({ ok: true, plan: made });
+});
+
+app.put('/api/plans/:id', requireAuth, requireMaster, function (req, res) {
+  var d = store.load();
+  var pl = d.room.plans.filter(function (x) { return x.id === req.params.id; })[0];
+  if (!pl) return res.status(404).json({ error: '그 프로그램을 찾지 못했어요.' });
+  var b = req.body || {};
+  if (b.title !== undefined) {
+    var title = clean(b.title, 80);
+    if (!title) return res.status(400).json({ error: '프로그램 이름을 적어 주세요.' });
+    pl.title = title;
+  }
+  if (b.memo !== undefined) pl.memo = clean(b.memo, 200);
+  if (b.applied !== undefined) pl.applied = !!b.applied;
+  if (Array.isArray(b.teacherIds)) {
+    var known = d.room.teachers.map(function (t) { return t.id; });
+    pl.teacherIds = b.teacherIds.filter(function (id) { return known.indexOf(id) >= 0; });
+  }
+  store.save(d);
+  res.json({ ok: true, plan: pl });
+});
+
+// 달력에 잡힌 것이 있으면 지우지 않는다. 여기서 지우면 그 수업의 planId 가 갈 곳을
+// 잃고, 화면에서는 아무 데도 속하지 않은 수업이 된다. 달력에서 먼저 지우게 한다.
+app.delete('/api/plans/:id', requireAuth, requireMaster, function (req, res) {
+  var d = store.load();
+  var pl = d.room.plans.filter(function (x) { return x.id === req.params.id; })[0];
+  if (!pl) return res.status(404).json({ error: '그 프로그램을 찾지 못했어요.' });
+  if (bookedPlanIds(d)[pl.id]) {
+    return res.status(409).json({ error: '달력에 잡힌 수업이 있어요. 달력에서 먼저 지워 주세요.' });
+  }
+  d.room.plans = d.room.plans.filter(function (x) { return x.id !== req.params.id; });
+  store.save(d);
+  res.json({ ok: true });
 });
 
 // ===== 수업(programs) — 마스터 전용 =====
@@ -281,8 +368,16 @@ app.post('/api/programs', requireAuth, requireMaster, function (req, res) {
   var known = d.room.teachers.map(function (t) { return t.id; });
   var teacherIds = (Array.isArray(b.teacherIds) ? b.teacherIds : []).filter(function (id) { return known.indexOf(id) >= 0; });
 
+  // 예정 목록에서 잡은 수업이면 어느 plan 에서 왔는지 들고 간다.
+  // 사이에 그 plan 이 지워졌다면 조용히 빈 값으로 둔다 — 수업 자체는 만들어져야 한다.
+  var planId = '';
+  if (b.planId) {
+    var pl = d.room.plans.filter(function (x) { return x.id === b.planId; })[0];
+    if (pl) planId = pl.id;
+  }
+
   var made = dates.map(function (date) {
-    return {
+    var p = {
       id: store.genId('p'),
       date: date,
       start: b.start,
@@ -293,6 +388,8 @@ app.post('/api/programs', requireAuth, requireMaster, function (req, res) {
       memo: clean(b.memo, 500),
       updatedAt: nowIso()
     };
+    if (planId) p.planId = planId;
+    return p;
   });
   d.programs = d.programs.concat(made);
   store.save(d);
@@ -575,6 +672,7 @@ app.get('/api/health', function (req, res) {
     // 담당자(master)는 명단에 늘 한 줄 있지만 '등록한 선생님' 수에는 넣지 않는다.
     // 이 숫자는 담당자가 몇 분을 등록했는지 확인하려고 보는 값이다.
     teachers: d.room.teachers.filter(function (t) { return t.id !== 'master'; }).length,
+    plans: d.room.plans.length,
     programs: d.programs.length,
     blocks: d.blocks.length
   });
