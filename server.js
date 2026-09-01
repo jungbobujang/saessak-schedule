@@ -393,6 +393,20 @@ app.post('/api/programs', requireAuth, function (req, res) {
     ? (Array.isArray(b.teacherIds) ? b.teacherIds : []).filter(function (id) { return known.indexOf(id) >= 0; })
     : [req.session.teacherId];
 
+  // 회차 묶음. 한 번에 여러 날짜를 만들면 그것이 하나의 묶음이고, 한 날짜만 만들어도
+  // 자기만의 묶음이다(나중에 [+ 날짜 추가] 로 회차를 붙일 수 있다).
+  // seriesId 를 들고 오면 이미 있는 묶음에 붙이는 것이다 — 남의 묶음에는 붙이지 못한다.
+  var seriesId = store.genId('s');
+  if (b.seriesId) {
+    var key = String(b.seriesId);
+    var members = d.programs.filter(function (x) { return Slots.seriesKeyOf(x) === key; });
+    if (!members.length) return res.status(404).json({ error: '그 수업 묶음을 찾지 못했어요.' });
+    if (!members.every(function (x) { return canEditProgram(req.session, x); })) {
+      return res.status(403).json({ error: NOT_MINE });
+    }
+    seriesId = key;
+  }
+
   // 예정 목록에서 잡은 수업이면 어느 plan 에서 왔는지 들고 간다.
   // 사이에 그 plan 이 지워졌다면 조용히 빈 값으로 둔다 — 수업 자체는 만들어져야 한다.
   // 선생님에게는 예정 목록 자체가 없으므로 planId 를 보내와도 담지 않는다.
@@ -414,6 +428,7 @@ app.post('/api/programs', requireAuth, function (req, res) {
       memo: clean(b.memo, 500),
       flex: Slots.isFlex(b.flex) ? b.flex : 'unknown',
       createdBy: isMaster ? 'master' : req.session.teacherId,
+      seriesId: seriesId,
       updatedAt: nowIso()
     };
     if (planId) p.planId = planId;
@@ -430,36 +445,53 @@ app.put('/api/programs/:id', requireAuth, function (req, res) {
   if (!p) return res.status(404).json({ error: '그 수업을 찾지 못했어요.' });
   if (!canEditProgram(req.session, p)) return res.status(403).json({ error: NOT_MINE });
   var b = req.body || {};
-  if (b.flex !== undefined && !Slots.isFlex(b.flex)) return res.status(400).json({ error: FLEX_ERROR });
 
-  if (b.date !== undefined) {
-    if (!isDate(b.date)) return res.status(400).json({ error: '날짜를 확인해 주세요.' });
-    p.date = b.date;
-  }
-  if (b.start !== undefined) {
-    if (!isTime(b.start)) return res.status(400).json({ error: '시간을 확인해 주세요.' });
-    p.start = b.start;
-  }
-  if (b.end !== undefined) {
-    if (!isTime(b.end)) return res.status(400).json({ error: '시간을 확인해 주세요.' });
-    p.end = b.end;
-  }
-  if (p.end <= p.start) return res.status(400).json({ error: '끝 시간이 시작 시간보다 빨라요.' });
-  if (b.title !== undefined) p.title = clean(b.title, 80) || '디지털새싹 수업';
-  if (b.memo !== undefined) p.memo = clean(b.memo, 500);
-  if (b.visibility !== undefined) p.visibility = b.visibility === 'all' ? 'all' : 'assigned';
-  if (b.flex !== undefined) p.flex = b.flex;
-  if (Array.isArray(b.teacherIds)) {
-    if (req.session.role === 'master') {
-      var known = d.room.teachers.map(function (t) { return t.id; });
-      p.teacherIds = b.teacherIds.filter(function (id) { return known.indexOf(id) >= 0; });
-    } else {
-      p.teacherIds = [req.session.teacherId];   // 선생님 수업의 담당은 언제나 본인이다
+  // 어디에 적을지 먼저 정한다. applyToSeries 는 **날짜만 빼고** 묶음 전체에 적는다 —
+  // 회차의 날짜는 회차마다 다른 것이 당연하므로 함께 옮기면 묶음이 한 날에 겹친다.
+  var targets = [p];
+  if (b.applyToSeries) {
+    var key = Slots.seriesKeyOf(p);
+    targets = d.programs.filter(function (x) { return Slots.seriesKeyOf(x) === key; });
+    if (!targets.every(function (x) { return canEditProgram(req.session, x); })) {
+      return res.status(403).json({ error: NOT_MINE });
     }
   }
-  p.updatedAt = nowIso();
+
+  // 값은 **모두 검사한 뒤에** 한꺼번에 적는다. 중간에 되돌아가면 일부 회차만 바뀐 채
+  // 남고, 되돌린 응답을 받은 사람은 아무것도 안 바뀐 줄 안다.
+  if (b.flex !== undefined && !Slots.isFlex(b.flex)) return res.status(400).json({ error: FLEX_ERROR });
+  if (b.date !== undefined && !isDate(b.date)) return res.status(400).json({ error: '날짜를 확인해 주세요.' });
+  if (b.start !== undefined && !isTime(b.start)) return res.status(400).json({ error: '시간을 확인해 주세요.' });
+  if (b.end !== undefined && !isTime(b.end)) return res.status(400).json({ error: '시간을 확인해 주세요.' });
+  var badTime = targets.some(function (x) {
+    var s = (b.start !== undefined) ? b.start : x.start;
+    var e = (b.end !== undefined) ? b.end : x.end;
+    return e <= s;
+  });
+  if (badTime) return res.status(400).json({ error: '끝 시간이 시작 시간보다 빨라요.' });
+
+  var known = d.room.teachers.map(function (t) { return t.id; });
+  targets.forEach(function (x) {
+    if (b.start !== undefined) x.start = b.start;
+    if (b.end !== undefined) x.end = b.end;
+    if (b.title !== undefined) x.title = clean(b.title, 80) || '디지털새싹 수업';
+    if (b.memo !== undefined) x.memo = clean(b.memo, 500);
+    if (b.visibility !== undefined) x.visibility = b.visibility === 'all' ? 'all' : 'assigned';
+    if (b.flex !== undefined) x.flex = b.flex;
+    if (Array.isArray(b.teacherIds)) {
+      x.teacherIds = (req.session.role === 'master')
+        ? b.teacherIds.filter(function (id) { return known.indexOf(id) >= 0; })
+        : [req.session.teacherId];              // 선생님 수업의 담당은 언제나 본인이다
+    }
+    x.updatedAt = nowIso();
+  });
+  if (b.date !== undefined) p.date = b.date;   // 날짜는 이 회차만
   store.save(d);
-  res.json({ ok: true, program: shapeProgram(p, req.session.role === 'master') });
+  res.json({
+    ok: true,
+    program: shapeProgram(p, req.session.role === 'master'),
+    updated: targets.length
+  });
 });
 
 // 조율 등급만 바꾼다. **본인이 담당인 수업이면 담당자가 잡아 준 것이라도** 바꿀 수 있다 —
@@ -477,6 +509,23 @@ app.patch('/api/programs/:id/flex', requireAuth, function (req, res) {
   p.updatedAt = nowIso();
   store.save(d);
   res.json({ ok: true, program: shapeProgram(p, req.session.role === 'master') });
+});
+
+// 묶음 통째로 지우기. 회차가 열 번이면 열 번 확인을 누르게 하지 않는다.
+// :seriesId 는 진짜 seriesId 이거나, 옛 자료의 지어낸 열쇠(~제목|담당|시작)다.
+app.delete('/api/programs/series/:seriesId', requireAuth, function (req, res) {
+  var d = store.load();
+  var key = String(req.params.seriesId);
+  var members = d.programs.filter(function (x) { return Slots.seriesKeyOf(x) === key; });
+  if (!members.length) return res.status(404).json({ error: '그 수업 묶음을 찾지 못했어요.' });
+  if (!members.every(function (x) { return canEditProgram(req.session, x); })) {
+    return res.status(403).json({ error: NOT_MINE });
+  }
+  var ids = {};
+  members.forEach(function (x) { ids[x.id] = true; });
+  d.programs = d.programs.filter(function (x) { return !ids[x.id]; });
+  store.save(d);
+  res.json({ ok: true, deleted: members.length });
 });
 
 app.delete('/api/programs/:id', requireAuth, function (req, res) {

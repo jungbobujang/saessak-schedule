@@ -166,6 +166,22 @@ button:hover{background:#eef1ea}
 /* 배정 폼에서 그날 이미 있는 수업 */
 .sameday{margin-top:6px;font-size:12.5px;color:var(--dim)}
 .sameday div{margin-top:2px}
+
+/* 시간 고르개 — 시 셀렉트 : 분 셀렉트. 24시간으로만 적는다. */
+.timepick{display:flex;align-items:center;gap:4px;min-width:0}
+.timepick select{flex:1;min-width:0;padding:8px 4px;border:1px solid var(--line);border-radius:8px;
+  background:#fff;text-align:center}
+.timepick .colon{color:var(--dim)}
+
+/* 회차 묶음 — 고치기 폼에서 이 수업의 다른 날짜를 오가고, 그 자리에서 회차를 더한다 */
+.seriesbox{margin-top:8px;padding:9px;border:1px solid var(--line);border-radius:9px;background:#fafbf8}
+.serieshead{font-size:12.5px;color:var(--dim);margin-bottom:6px}
+.seriesbox .pill{cursor:pointer}
+.seriesbox .pill.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600;cursor:default}
+.seriesadd{display:flex;gap:6px;margin-top:8px}
+.seriesadd input[type=date]{flex:1;min-width:0;padding:6px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.applyall{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13.5px}
+.applyall input{width:17px;height:17px;margin:0}
 .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .empty{color:var(--dim);font-size:13px}
 /* 카드 안 작은 단추 — 링크 글씨보다 손이 닿기 쉽다 */
@@ -304,6 +320,8 @@ td input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--lin
   .acts button{width:100%;min-height:44px}
   .rowacts{flex-direction:row}
   .rowacts button{min-height:36px}
+  .timepick select{min-height:44px}
+  .seriesadd input[type=date]{min-height:44px}
   .plan{flex-wrap:wrap}
   .plan .rowacts{width:100%}
   .planadd input[type=text]{min-height:44px}
@@ -1292,6 +1310,144 @@ function renderPanel() {
   box.appendChild(acts);
 }
 
+// ── 시간 고르개 ──────────────────────────────────────
+// <input type=time> 은 기기마다 다르게 뜨고(오전/오후 다이얼, 12시간 표기) 손가락으로
+// 분을 맞추기가 어렵다. 시·분 셀렉트 둘로 세우고 24시간으로만 적는다. 분은 10분 단위.
+var MINUTES = ['00', '10', '20', '30', '40', '50'];
+var TIME_ERROR = '끝나는 시간이 시작보다 빨라요.';
+function timePicker(value, onChange) {
+  var m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '')) || [];
+  var hh = pad(Number(m[1] || 9)), mm = m[2] || '00';
+  var box = el('div', 'timepick');
+  var h = el('select');
+  for (var i = 0; i < 24; i++) {
+    var op = el('option', null, pad(i));
+    op.value = pad(i);
+    if (op.value === hh) op.selected = true;
+    h.appendChild(op);
+  }
+  var mi = el('select');
+  // 옛 자료의 13:45 같은 값은 목록에 없다. 그래도 그 값을 그대로 보여 준다 —
+  // 화면을 열었다는 이유로 저장된 시각이 말없이 바뀌면 안 된다.
+  var list = MINUTES.slice();
+  if (list.indexOf(mm) < 0) { list.push(mm); list.sort(); }
+  list.forEach(function (v) {
+    var op = el('option', null, v);
+    op.value = v;
+    if (v === mm) op.selected = true;
+    mi.appendChild(op);
+  });
+  box.appendChild(h);
+  box.appendChild(el('span', 'colon', ':'));
+  box.appendChild(mi);
+  if (onChange) { h.addEventListener('change', onChange); mi.addEventListener('change', onChange); }
+  return {
+    node: box,
+    get: function () { return h.value + ':' + mi.value; },
+    set: function (v) {
+      var p = /^(\d{2}):(\d{2})$/.exec(String(v || ''));
+      if (!p) return;
+      h.value = p[1];
+      var found = false;
+      for (var k = 0; k < mi.options.length; k++) if (mi.options[k].value === p[2]) found = true;
+      if (!found) { var extra = el('option', null, p[2]); extra.value = p[2]; mi.appendChild(extra); }
+      mi.value = p[2];
+    }
+  };
+}
+// 시작을 옮기면 끝을 세 시간 뒤로 제안한다(고칠 수 있다). 하루는 넘기지 않는다.
+function suggestEnd(start) {
+  var p = /^(\d{2}):(\d{2})$/.exec(String(start || ''));
+  if (!p) return '12:00';
+  var mins = Number(p[1]) * 60 + Number(p[2]) + 180;
+  var last = 23 * 60 + 50;
+  if (mins > last) mins = last;
+  return pad(Math.floor(mins / 60)) + ':' + pad(mins % 60);
+}
+// 시작·끝 한 벌
+function timeRange(startVal, endVal) {
+  var end = timePicker(endVal || '12:00');
+  var start = timePicker(startVal || '09:00', function () {
+    if (end.get() <= start.get()) end.set(suggestEnd(start.get()));
+  });
+  var box = el('div', 'two');
+  box.appendChild(start.node);
+  box.appendChild(end.node);
+  return {
+    node: box, start: start, end: end,
+    ok: function () { return end.get() > start.get(); }
+  };
+}
+
+// ── 회차 묶음 줄(고치기 폼) ──────────────────────────
+// "이 수업의 다른 날짜" 를 알약으로 늘어놓고, 그 자리에서 회차를 더한다.
+// 목록은 달에 매이면 안 된다 — 9월 화면에서도 11월 회차가 보여야 하므로 전체를 따로 받는다.
+function seriesRow(pr, opts) {
+  var box = el('div', 'seriesbox');
+  box.appendChild(el('div', 'serieshead', '이 수업의 다른 날짜'));
+  var pills = el('div', 'pills');
+  box.appendChild(pills);
+
+  var addLine = el('div', 'seriesadd');
+  var dateIn = el('input'); dateIn.type = 'date';
+  var addBtn = el('button', 'btn-sm', '+ 날짜 추가');
+  addLine.appendChild(dateIn);
+  addLine.appendChild(addBtn);
+  box.appendChild(addLine);
+  var msg = el('div', 'formmsg');
+  box.appendChild(msg);
+
+  var members = [];
+  function draw() {
+    pills.innerHTML = '';
+    members.forEach(function (x) {
+      var here = x.id === pr.id;
+      var b = el('button', 'pill' + (here ? ' on' : ''), shortDate(x.date));
+      b.title = x.date + (here ? ' · 지금 고치는 회차' : ' 회차로 옮겨 고치기');
+      if (!here) b.addEventListener('click', function () { opts.onSwitch(x); });
+      pills.appendChild(b);
+    });
+    if (members.length < 2) pills.appendChild(el('span', 'empty', '이 회차 하나뿐이에요.'));
+    opts.onCount(members.length);
+  }
+  async function reload() {
+    try {
+      var d = await api('GET', '/api/data?month=all');
+      members = Slots.seriesOf(d.programs, pr);
+    } catch (e) {
+      members = Slots.seriesOf(S.programs, pr);   // 못 받아 오면 이번 달 것으로라도
+    }
+    draw();
+  }
+  members = Slots.seriesOf(S.programs, pr);
+  draw();
+  reload();
+
+  addBtn.addEventListener('click', async function () {
+    msg.className = 'formmsg'; msg.textContent = '';
+    var ds = dateIn.value;
+    if (!ds) { msg.className = 'formmsg bad'; msg.textContent = '더할 날짜를 골라 주세요.'; return; }
+    var body = opts.values();
+    if (body.end <= body.start) { msg.className = 'formmsg bad'; msg.textContent = TIME_ERROR; return; }
+    body.dates = [ds];
+    body.seriesId = Slots.seriesKeyOf(pr);
+    addBtn.disabled = true;
+    try {
+      await api('POST', '/api/programs', body);
+      dateIn.value = '';
+      await refresh();       // 달력에도 바로 얹힌다(폼은 열린 채 그대로 둔다)
+      await reload();
+      toast(shortDate(ds) + ' 회차를 추가했어요');
+    } catch (e) {
+      msg.className = 'formmsg bad';
+      msg.textContent = '더하지 못했어요: ' + e.message;
+    }
+    addBtn.disabled = false;
+  });
+
+  return { node: box, count: function () { return members.length; } };
+}
+
 // 상세 카드 안 인라인 조율 단추 — 누르면 그 자리에서 바로 저장된다.
 // 담당자는 수업을 통째로 고칠 수 있으니 PUT, 선생님은 조율만 바꾸는 PATCH 를 쓴다.
 function inlineFlex(pr) {
@@ -1336,12 +1492,13 @@ function openTeacherProgramForm(pr) {
   title.placeholder = '예: 학년 공개수업';
   f.appendChild(title);
 
+  // 고칠 때는 이 자리에 회차 묶음 줄이 들어온다(폼 값을 다 만든 뒤 아래에서 채운다)
+  var seriesSlot = el('div');
+  f.appendChild(seriesSlot);
+
   f.appendChild(el('label', null, '시간'));
-  var two = el('div', 'two');
-  var st = el('input'); st.type = 'time'; st.value = pr ? pr.start : '09:00';
-  var en = el('input'); en.type = 'time'; en.value = pr ? pr.end : '12:00';
-  two.appendChild(st); two.appendChild(en);
-  f.appendChild(two);
+  var time = timeRange(pr ? pr.start : '09:00', pr ? pr.end : '12:00');
+  f.appendChild(time.node);
 
   f.appendChild(el('label', null, '조율'));
   var flex = flexPicker(pr ? Slots.flexOf(pr) : 'unknown');
@@ -1367,16 +1524,22 @@ function openTeacherProgramForm(pr) {
   var memo = el('textarea'); memo.value = pr ? (pr.memo || '') : '';
   f.appendChild(memo);
 
+  function formBody() {
+    return {
+      title: title.value, start: time.start.get(), end: time.end.get(),
+      flex: flex.get(), visibility: vis, memo: memo.value
+    };
+  }
+
   var msg = el('div', 'formmsg');
   var acts = el('div', 'acts');
   var save = el('button', 'btn-main', '저장');
   save.addEventListener('click', async function () {
     msg.className = 'formmsg'; msg.textContent = '';
+    if (!time.ok()) { msg.className = 'formmsg bad'; msg.textContent = TIME_ERROR; return; }
     save.disabled = true;
-    var body = {
-      title: title.value, start: st.value, end: en.value,
-      flex: flex.get(), visibility: vis, memo: memo.value
-    };
+    var body = formBody();
+    if (pr && applyCb.checked) body.applyToSeries = true;
     try {
       if (pr) { body.date = ds; await api('PUT', '/api/programs/' + pr.id, body); }
       else { body.dates = [ds]; await api('POST', '/api/programs', body); }
@@ -1395,7 +1558,51 @@ function openTeacherProgramForm(pr) {
   var cancel = el('button', null, '취소');
   cancel.addEventListener('click', function () { closeForm(); renderPanel(); });
   acts.appendChild(cancel);
+
+  var delAll = null;
+  if (pr) {
+    var del = el('button', 'btn-danger', '삭제');
+    del.addEventListener('click', async function () {
+      if (!confirm('이 회차를 지울까요?')) return;
+      try { await api('DELETE', '/api/programs/' + pr.id); closeForm(); await refresh(); toast('지웠어요'); }
+      catch (e) { msg.className = 'formmsg bad'; msg.textContent = '지우지 못했어요: ' + e.message; }
+    });
+    acts.appendChild(del);
+
+    delAll = el('button', 'btn-sm btn-danger hide', '모든 회차 삭제');
+    delAll.addEventListener('click', async function () {
+      if (!confirm(seriesCount + '개 회차를 모두 지울까요?')) return;
+      try {
+        await api('DELETE', '/api/programs/series/' + encodeURIComponent(Slots.seriesKeyOf(pr)));
+        closeForm(); await refresh(); toast('모든 회차를 지웠어요');
+      } catch (e) { msg.className = 'formmsg bad'; msg.textContent = '지우지 못했어요: ' + e.message; }
+    });
+    acts.appendChild(delAll);
+  }
+
+  var applyBox = el('label', 'applyall hide');
+  var applyCb = el('input'); applyCb.type = 'checkbox';
+  var applyText = el('span', null, '모든 회차에 적용');
+  applyBox.appendChild(applyCb);
+  applyBox.appendChild(applyText);
+
+  var seriesCount = 1;
+  function onSeriesCount(n) {
+    seriesCount = n;
+    applyText.textContent = '모든 회차에 적용 (' + n + '개)';
+    applyBox.classList.toggle('hide', n < 2);
+    if (delAll) delAll.classList.toggle('hide', n < 2);
+  }
+  if (pr) {
+    seriesSlot.appendChild(seriesRow(pr, {
+      onSwitch: function (x) { closeForm(); openTeacherProgramForm(x); },
+      onCount: onSeriesCount,
+      values: formBody
+    }).node);
+  }
+
   f.appendChild(acts);
+  if (pr) f.appendChild(applyBox);
   f.appendChild(msg);
   box.appendChild(f);
 }
@@ -1439,6 +1646,9 @@ function openProgramForm(pr, plan) {
     more.addEventListener('click', function () { addDateLine(S.pick); refreshWhen(); });
     f.appendChild(more);
   }
+  // 고칠 때는 이 자리에 회차 묶음 줄이 들어온다(폼 값을 다 만든 뒤 아래에서 채운다)
+  var seriesSlot = el('div');
+  f.appendChild(seriesSlot);
 
   var holWarn = el('div', 'holwarn hide');
   f.appendChild(holWarn);
@@ -1448,11 +1658,8 @@ function openProgramForm(pr, plan) {
   f.appendChild(sameDay);
 
   f.appendChild(el('label', null, '시간'));
-  var two = el('div', 'two');
-  var st = el('input'); st.type = 'time'; st.value = pr ? pr.start : '09:00';
-  var en = el('input'); en.type = 'time'; en.value = pr ? pr.end : '12:00';
-  two.appendChild(st); two.appendChild(en);
-  f.appendChild(two);
+  var time = timeRange(pr ? pr.start : '09:00', pr ? pr.end : '12:00');
+  f.appendChild(time.node);
 
   f.appendChild(el('label', null, '담당 선생님'));
   var checks = el('div', 'checks');
@@ -1541,19 +1748,30 @@ function openProgramForm(pr, plan) {
   var memo = el('textarea'); memo.value = pr ? (pr.memo || '') : '';
   f.appendChild(memo);
 
+  // 폼에 적힌 값 한 벌. 저장할 때도, [+ 날짜 추가] 로 회차를 더할 때도 이것을 쓴다.
+  function formBody() {
+    var picked = boxes.filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+    if (joinCb.checked) picked.push('master');
+    return {
+      title: title.value, start: time.start.get(), end: time.end.get(), flex: flex.get(),
+      teacherIds: picked, visibility: visCb.checked ? 'all' : 'assigned', memo: memo.value
+    };
+  }
+
   var msg = el('div', 'formmsg');
   var acts = el('div', 'acts');
   var save = el('button', 'btn-main', '저장');
   save.addEventListener('click', async function () {
     msg.className = 'formmsg';
     msg.textContent = '';
-    var picked = boxes.filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
-    if (joinCb.checked) picked.push('master');
     var ds = [].slice.call(dates.querySelectorAll('input')).map(function (i) { return i.value; }).filter(Boolean);
-    var body = {
-      title: title.value, start: st.value, end: en.value, flex: flex.get(),
-      teacherIds: picked, visibility: visCb.checked ? 'all' : 'assigned', memo: memo.value
-    };
+    var body = formBody();
+    if (!time.ok()) {
+      msg.className = 'formmsg bad';
+      msg.textContent = TIME_ERROR;
+      return;
+    }
+    if (pr && applyCb.checked) body.applyToSeries = true;
     save.disabled = true;
     try {
       if (pr) { body.date = ds[0]; await api('PUT', '/api/programs/' + pr.id, body); }
@@ -1577,17 +1795,53 @@ function openProgramForm(pr, plan) {
   cancel.addEventListener('click', function () { closeForm(); renderPanel(); });
   acts.appendChild(cancel);
 
+  // [삭제] 는 언제나 **이 회차만** 이다. 묶음을 통째로 지우는 것은 따로,
+  // 몇 개를 지우는지 세어 물어본 다음에 한다.
+  var delAll = null;
   if (pr) {
     var del = el('button', 'btn-danger', '삭제');
     del.addEventListener('click', async function () {
-      if (!confirm('이 수업을 지울까요?')) return;
-      try { await api('DELETE', '/api/programs/' + pr.id); closeForm(); await refresh(); }
+      if (!confirm('이 회차를 지울까요?')) return;
+      try { await api('DELETE', '/api/programs/' + pr.id); closeForm(); await refresh(); toast('지웠어요'); }
       catch (e) { msg.className = 'formmsg bad'; msg.textContent = '지우지 못했어요: ' + e.message; }
     });
     acts.appendChild(del);
+
+    delAll = el('button', 'btn-sm btn-danger hide', '모든 회차 삭제');
+    delAll.addEventListener('click', async function () {
+      if (!confirm(seriesCount + '개 회차를 모두 지울까요?')) return;
+      try {
+        await api('DELETE', '/api/programs/series/' + encodeURIComponent(Slots.seriesKeyOf(pr)));
+        closeForm(); await refresh(); toast('모든 회차를 지웠어요');
+      } catch (e) { msg.className = 'formmsg bad'; msg.textContent = '지우지 못했어요: ' + e.message; }
+    });
+    acts.appendChild(delAll);
+  }
+
+  // 모든 회차에 적용 — 날짜만 빼고 이 폼의 값을 묶음 전체에 적는다. 기본은 꺼짐이다.
+  var applyBox = el('label', 'applyall hide');
+  var applyCb = el('input'); applyCb.type = 'checkbox';
+  var applyText = el('span', null, '모든 회차에 적용');
+  applyBox.appendChild(applyCb);
+  applyBox.appendChild(applyText);
+
+  var seriesCount = 1;
+  function onSeriesCount(n) {
+    seriesCount = n;
+    applyText.textContent = '모든 회차에 적용 (' + n + '개)';
+    applyBox.classList.toggle('hide', n < 2);
+    if (delAll) delAll.classList.toggle('hide', n < 2);
+  }
+  if (pr) {
+    seriesSlot.appendChild(seriesRow(pr, {
+      onSwitch: function (x) { closeForm(); openProgramForm(x); },
+      onCount: onSeriesCount,
+      values: formBody
+    }).node);
   }
 
   f.appendChild(acts);
+  if (pr) f.appendChild(applyBox);
   f.appendChild(msg);
   box.appendChild(f);
 }

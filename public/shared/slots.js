@@ -51,6 +51,22 @@
   // 누가 잡은 수업인가. 옛 자료에는 없다 — 그때는 담당자만 수업을 만들 수 있었다.
   function createdByOf(pr) { return (pr && pr.createdBy) ? pr.createdBy : 'master'; }
 
+  // 회차 묶음. 여러 날짜로 함께 만든 수업은 같은 seriesId 를 지고 다닌다.
+  // 옛 자료에는 이 칸이 없다 — 파일을 고치지 않고 **읽을 때** 제목·담당·시작시간이
+  // 같은 것끼리 한 묶음으로 본다. 그 셋이 같으면 사람이 보기에도 같은 수업의 회차다.
+  // 지어낸 열쇠는 '~' 로 시작하니 진짜 seriesId(s_...)와 헷갈리지 않는다.
+  function seriesKeyOf(pr) {
+    if (pr && pr.seriesId) return String(pr.seriesId);
+    var ids = ((pr && pr.teacherIds) || []).slice().sort().join(',');
+    return '~' + ((pr && pr.title) || '') + '|' + ids + '|' + ((pr && pr.start) || '');
+  }
+  // 그 묶음에 속한 것들을 날짜 순으로
+  function seriesOf(programs, pr) {
+    var key = seriesKeyOf(pr);
+    return (programs || []).filter(function (x) { return seriesKeyOf(x) === key; })
+      .slice().sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+  }
+
   function isSlot(v) { return SLOTS.indexOf(v) >= 0; }
   function slotOf(block) {
     return (block && isSlot(block.slot)) ? block.slot : 'all';
@@ -121,6 +137,7 @@
     VIS: VIS, VIS_HINT: VIS_HINT,
     FLEX: FLEX, FLEX_LABEL: FLEX_LABEL,
     isFlex: isFlex, flexOf: flexOf, flexLabel: flexLabel, createdByOf: createdByOf,
+    seriesKeyOf: seriesKeyOf, seriesOf: seriesOf,
     isSlot: isSlot, slotOf: slotOf, memoOf: memoOf, slotLabel: slotLabel,
     isVis: isVis, visOf: visOf, narrowestVis: narrowestVis,
     visBtnLabel: visBtnLabel, visTagLabel: visTagLabel,
