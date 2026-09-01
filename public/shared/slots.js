@@ -40,6 +40,17 @@
     full: '다른 선생님에게 메모까지 보여요.'
   };
 
+  // 조율 등급 — **사람이 아니라 이 수업의 성질**이다. 같은 선생님이라도 어떤 수업은
+  // 옮겨도 되고 어떤 수업은 못 옮긴다. 옛 자료에는 이 칸이 없다 — 파일을 고치지 않고
+  // 읽을 때 '확인 필요' 로 본다(모른다는 것도 사실이다. 함부로 '옮겨도 됨' 으로 두지 않는다).
+  var FLEX = ['free', 'some', 'fixed', 'unknown'];
+  var FLEX_LABEL = { free: '옮겨도 됨', some: '어느 정도', fixed: '옮길 수 없음', unknown: '확인 필요' };
+  function isFlex(v) { return FLEX.indexOf(v) >= 0; }
+  function flexOf(pr) { return (pr && isFlex(pr.flex)) ? pr.flex : 'unknown'; }
+  function flexLabel(pr) { return FLEX_LABEL[flexOf(pr)]; }
+  // 누가 잡은 수업인가. 옛 자료에는 없다 — 그때는 담당자만 수업을 만들 수 있었다.
+  function createdByOf(pr) { return (pr && pr.createdBy) ? pr.createdBy : 'master'; }
+
   function isSlot(v) { return SLOTS.indexOf(v) >= 0; }
   function slotOf(block) {
     return (block && isSlot(block.slot)) ? block.slot : 'all';
@@ -108,6 +119,8 @@
   return {
     SLOTS: SLOTS, LABEL: LABEL, NOON: NOON, EMPTY_MEMO: EMPTY_MEMO,
     VIS: VIS, VIS_HINT: VIS_HINT,
+    FLEX: FLEX, FLEX_LABEL: FLEX_LABEL,
+    isFlex: isFlex, flexOf: flexOf, flexLabel: flexLabel, createdByOf: createdByOf,
     isSlot: isSlot, slotOf: slotOf, memoOf: memoOf, slotLabel: slotLabel,
     isVis: isVis, visOf: visOf, narrowestVis: narrowestVis,
     visBtnLabel: visBtnLabel, visTagLabel: visTagLabel,

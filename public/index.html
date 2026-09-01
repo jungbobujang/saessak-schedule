@@ -144,15 +144,28 @@ button:hover{background:#eef1ea}
 .who-list .no{color:var(--dim)}
 .who-list .sub{color:var(--dim);font-size:12px;margin-left:5px}
 
-/* 조율 등급 — 담당자만 본다. 신분 색(진한 팔레트)과 헷갈리지 않게 채도를 낮춘 톤이고,
-   이름 뒤에 붙는 작은 점 하나로만 말한다. 수업 카드 배경색은 등급과 무관하다. */
-.gdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:5px;vertical-align:middle;
+/* 조율 등급 — **사람이 아니라 이 수업**에 붙는다. 신분 색(진한 팔레트)과 헷갈리지 않게
+   채도를 낮춘 톤이고, 카드 오른쪽 위 모서리의 점 하나로만 말한다.
+   카드 배경색은 담당 선생님 색 그대로다 — 조율과 신분은 다른 이야기다. */
+.fdot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;
   border:1px solid rgba(0,0,0,.12)}
-.g-free{background:#8fbf9a}
-.g-some{background:#dcc77e}
-.g-hard{background:#d79b96}
-.g-unknown{background:#c3c8be}
-.g-name{color:var(--dim);font-size:12px;margin-left:4px}
+.f-free{background:#8fbf9a}
+.f-some{background:#dcc77e}
+.f-fixed{background:#d79b96}
+.f-unknown{background:#c3c8be}
+.card{position:relative}
+.card .fdot{position:absolute;top:4px;right:4px;border-color:rgba(255,255,255,.7)}
+.card.hasflex{padding-right:16px}
+.legend .fdot{margin-right:5px}
+/* 폼의 조율 단추 4개 — 좁은 패널에서는 2×2 로 접힌다 */
+.flexpick{display:flex;flex-wrap:wrap;gap:6px}
+.flexpick .slot-btn{flex:1 1 44%;padding:8px 4px}
+/* 상세 카드 안 인라인 조율 단추 — 누르면 그 자리에서 바로 저장된다 */
+.rowflex{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.rowflex .slot-btn{padding:3px 9px;font-size:12px;border-radius:7px}
+/* 배정 폼에서 그날 이미 있는 수업 */
+.sameday{margin-top:6px;font-size:12.5px;color:var(--dim)}
+.sameday div{margin-top:2px}
 .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .empty{color:var(--dim);font-size:13px}
 /* 카드 안 작은 단추 — 링크 글씨보다 손이 닿기 쉽다 */
@@ -239,7 +252,6 @@ td input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--lin
 .cpop-cur{display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
 .cpop-cur-label{font-size:12px;color:var(--dim)}
 .card .co-more{opacity:.85}
-td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer}
 
 /* ── 프로그램 화면 ─────────────────────────── */
 #view-programs .wrap{display:block}
@@ -362,12 +374,12 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         <span><i class="lg-h"></i>휴일</span>
         <span class="ver" id="ver"></span>
       </div>
-      <div class="legend hide" id="legend-grade">
-        <span>조율 등급</span>
-        <span><i class="g-free"></i>자유로움</span>
-        <span><i class="g-some"></i>어느 정도 가능</span>
-        <span><i class="g-hard"></i>조율 어려움</span>
-        <span><i class="g-unknown"></i>확인 필요</span>
+      <div class="legend">
+        <span>조율:</span>
+        <span><span class="fdot f-free"></span>옮겨도 됨</span>
+        <span><span class="fdot f-some"></span>어느 정도</span>
+        <span><span class="fdot f-fixed"></span>옮길 수 없음</span>
+        <span><span class="fdot f-unknown"></span>확인 필요</span>
       </div>
       </div><!-- /#calview -->
     </div>
@@ -394,7 +406,7 @@ td select.grade-select{width:100%;padding:6px;border:1px solid var(--line);borde
         <h2 style="margin-top:18px">선생님 명단</h2>
         <p class="note-line" style="margin:0 0 8px">각 선생님의 CODE — 휴대폰 뒷자리 4자리를 권장합니다. 사이트 주소와 함께 알려 주세요.</p>
         <table>
-          <thead><tr><th style="width:22%">이름</th><th style="width:12%">반</th><th style="width:20%">CODE(4자리, 겹치면 6자리)</th><th style="width:10%">색</th><th style="width:22%">조율 등급</th><th></th></tr></thead>
+          <thead><tr><th style="width:26%">이름</th><th style="width:14%">반</th><th style="width:26%">CODE(4자리, 겹치면 6자리)</th><th style="width:10%">색</th><th></th></tr></thead>
           <tbody id="tea-body"></tbody>
         </table>
         <h2 style="margin-top:22px">학교 휴업일</h2>
@@ -527,20 +539,41 @@ function findHoliday(ds, builtins, school) {
 function holidayOf(ds) { return findHoliday(ds, S.holidays, S.schoolHolidays); }
 S.month = today().slice(0, 7);
 
-// 조율 등급 — 담당자 화면에서만 쓴다. 선생님 응답에는 grade 가 아예 없다.
-var GRADES = {
-  free: { label: '자유로움', cls: 'g-free', order: 0 },
-  some: { label: '어느 정도 가능', cls: 'g-some', order: 1 },
-  unknown: { label: '확인 필요', cls: 'g-unknown', order: 2 },
-  hard: { label: '조율 어려움', cls: 'g-hard', order: 3 }
-};
-function gradeOf(t) { return (t && GRADES[t.grade]) ? t.grade : 'unknown'; }
-// 이름 뒤에 붙는 점 하나. 신분 색은 건드리지 않는다.
-function gradeDot(t) {
-  var g = gradeOf(t);
-  var s = el('span', 'gdot ' + GRADES[g].cls);
-  s.title = GRADES[g].label;
+// 조율 등급 — 사람이 아니라 **이 수업**의 성질이다. 규칙은 서버와 같은 파일(Slots)에 있다.
+// 카드 오른쪽 위 모서리에 찍는 점 하나.
+function flexDot(pr) {
+  var f = Slots.flexOf(pr);
+  var s = el('span', 'fdot f-' + f);
+  s.title = '조율: ' + Slots.FLEX_LABEL[f];
   return s;
+}
+// 조율 단추 4개. 고른 것만 진하게 남는다(안 되는 날 폼의 시간대 단추와 같은 손맛).
+function flexPicker(initial) {
+  var cur = Slots.isFlex(initial) ? initial : 'unknown';
+  var box = el('div', 'flexpick');
+  var btns = {};
+  Slots.FLEX.forEach(function (key) {
+    var b = el('button', 'slot-btn' + (key === cur ? ' on' : ''), Slots.FLEX_LABEL[key]);
+    b.addEventListener('click', function () {
+      cur = key;
+      Object.keys(btns).forEach(function (k) { btns[k].classList.toggle('on', k === key); });
+    });
+    btns[key] = b;
+    box.appendChild(b);
+  });
+  return { node: box, get: function () { return cur; } };
+}
+
+// 배정 폼에서 날짜를 고르면 그날 이미 있는 수업을 늘어놓는다.
+// 겹쳐 잡을지는 사람이 정한다 — 여기서 막지 않는다.
+function sameDayLines(programs, ds, nameFn) {
+  return (programs || []).filter(function (p) { return p.date === ds; })
+    .slice()
+    .sort(function (a, b) { return a.start < b.start ? -1 : (a.start > b.start ? 1 : 0); })
+    .map(function (p) {
+      var who = (p.teacherIds || []).map(nameFn).join('·');
+      return '이날 ' + (who ? who + ' · ' : '') + p.title + ' ' + p.start + ' · ' + Slots.flexLabel(p);
+    });
 }
 // '가능' 을 셀 때 담당자(master)는 빼고 센다 — 등록된 선생님만이 대상이다.
 function realTeachers() {
@@ -598,9 +631,9 @@ function programOwnerLine(pr, role, meId, nameFn, masterNm) {
     var who = namesInOrder(pr).map(nameFn).join('·');
     var line = t + (who ? ' · ' + who : '');
     if (pr.visibility === 'all') line += ' · 전체 공개';
-    return line;
+    return line + ' · ' + Slots.flexLabel(pr);
   }
-  return t + ' · ' + teacherOwnerText(pr, meId, nameFn);
+  return t + ' · ' + teacherOwnerText(pr, meId, nameFn) + ' · ' + Slots.flexLabel(pr);
 }
 
 // 카드 글자와 표식을 만드는 순수 함수. 화면 밖에서도 그대로 부를 수 있게
@@ -832,7 +865,6 @@ function renderCal() {
   $('go-setup').classList.toggle('hide', S.role !== 'master');
   $('go-programs').classList.toggle('hide', S.role !== 'master');
   $('teacher-note').classList.toggle('hide', S.role === 'master');
-  $('legend-grade').classList.toggle('hide', S.role !== 'master');
 
   var p = S.month.split('-');
   var y = Number(p[0]), mo = Number(p[1]);
@@ -871,7 +903,9 @@ function programCardEl(pr) {
   } else {
     c.classList.add('open');              // 내 것이 아닌 공개 수업: 흰 바탕
   }
-  c.title = parts.text;
+  c.title = parts.text + ' · ' + Slots.flexLabel(pr);
+  c.classList.add('hasflex');
+  c.appendChild(flexDot(pr));
 
   // 1행 — 시간(연하게) + 제목(진하게)
   var r1 = el('div', 'c1');
@@ -1020,7 +1054,6 @@ function renderChips() {
     b.appendChild(dot);
     b.appendChild(document.createTextNode(
       (t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : '') + (t.code ? ' · ' + t.code : '')));
-    if (t.id !== 'master') b.appendChild(gradeDot(t));
     b.addEventListener('click', function () {
       S.hidden[t.id] = !S.hidden[t.id];
       renderCal();
@@ -1149,11 +1182,30 @@ function renderPanel() {
     if (S.role === 'master' && !masterJoins(pr) && blockedOn('master', ds)) {
       r.appendChild(el('div', 'who', '이날 나는 안 되지만 수업은 담당 선생님이 진행합니다.'));
     }
+    // 조율은 그 수업을 맡은 사람이 제일 잘 안다. 담당자는 물론, 담당 선생님도
+    // (담당자가 잡아 준 수업이라도) 여기서 바로 표시할 수 있다.
+    var iAmOn = (pr.teacherIds || []).indexOf(S.me.id) >= 0;
+    if (S.role === 'master' || iAmOn) r.appendChild(inlineFlex(pr));
+
     if (S.role === 'master') {
       var edit = el('button', 'btn-sm', '고치기');
       edit.addEventListener('click', function () { openProgramForm(pr); });
-      var acts = el('div', 'rowacts'); acts.appendChild(edit);
-      r.appendChild(acts);
+      var acts0 = el('div', 'rowacts'); acts0.appendChild(edit);
+      r.appendChild(acts0);
+    } else if (Slots.createdByOf(pr) === S.me.id) {
+      // 내가 적은 수업만 고치고 지운다. 담당자가 잡아 준 수업은 조율 표시까지다.
+      var acts1 = el('div', 'rowacts');
+      var edit2 = el('button', 'btn-sm', '고치기');
+      edit2.addEventListener('click', function () { openTeacherProgramForm(pr); });
+      acts1.appendChild(edit2);
+      var del2 = el('button', 'btn-sm btn-danger', '지우기');
+      del2.addEventListener('click', async function () {
+        if (!window.confirm('이 수업을 지울까요?')) return;
+        try { await api('DELETE', '/api/programs/' + pr.id); await refresh(); toast('지웠어요'); }
+        catch (e) { alert('지우지 못했어요: ' + e.message); }
+      });
+      acts1.appendChild(del2);
+      r.appendChild(acts1);
     }
     box.appendChild(r);
   });
@@ -1196,9 +1248,7 @@ function renderPanel() {
       var ul = el('ul', 'who-list');
       pool.forEach(function (t) {
         var li = el('li');
-        var left = el('span', null, (t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : ''));
-        left.appendChild(gradeDot(t));
-        li.appendChild(left);
+        li.appendChild(el('span', null, (t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : '')));
 
         var st = statusOf(t.id, ds);
         if (!st.free) {
@@ -1226,13 +1276,128 @@ function renderPanel() {
     var addB = el('button', null, '+ 내 안 되는 날');
     addB.addEventListener('click', function () { openBlockForm(); });
     acts.appendChild(addB);
-  } else if (!blockedOn(S.me.id, ds)) {
+  } else {
     // 이미 적어 둔 날이면 카드 안의 [고치기] 를 쓰면 된다 — 같은 날 두 장은 만들지 않는다
-    var addB2 = el('button', 'btn-main', '+ 이날 안 돼요');
-    addB2.addEventListener('click', function () { openBlockForm(); });
-    acts.appendChild(addB2);
+    if (!blockedOn(S.me.id, ds)) {
+      var addB2 = el('button', 'btn-main', '+ 이날 안 돼요');
+      addB2.addEventListener('click', function () { openBlockForm(); });
+      acts.appendChild(addB2);
+    }
+    // 선생님도 자기 수업을 적는다. 담당자 화면에도 그대로 보인다 —
+    // 그래야 담당자가 이날 이 선생님에게 또 배정하지 않는다.
+    var addP2 = el('button', null, '+ 이날 수업 있어요');
+    addP2.addEventListener('click', function () { openTeacherProgramForm(null); });
+    acts.appendChild(addP2);
   }
   box.appendChild(acts);
+}
+
+// 상세 카드 안 인라인 조율 단추 — 누르면 그 자리에서 바로 저장된다.
+// 담당자는 수업을 통째로 고칠 수 있으니 PUT, 선생님은 조율만 바꾸는 PATCH 를 쓴다.
+function inlineFlex(pr) {
+  var box = el('div', 'rowflex');
+  Slots.FLEX.forEach(function (key) {
+    var b = el('button', 'slot-btn' + (Slots.flexOf(pr) === key ? ' on' : ''), Slots.FLEX_LABEL[key]);
+    b.addEventListener('click', async function () {
+      if (Slots.flexOf(pr) === key) return;
+      b.disabled = true;
+      try {
+        if (S.role === 'master') await api('PUT', '/api/programs/' + pr.id, { flex: key });
+        else await api('PATCH', '/api/programs/' + pr.id + '/flex', { flex: key });
+        await refresh();
+        toast('조율: ' + Slots.FLEX_LABEL[key]);
+      } catch (e) {
+        b.disabled = false;
+        alert('바꾸지 못했어요: ' + e.message);
+      }
+    });
+    box.appendChild(b);
+  });
+  return box;
+}
+
+// ── 내 수업 폼(선생님) ───────────────────────────────
+// 선생님이 직접 적는 수업이다. 담당은 언제나 본인이라 담당 칸이 없다 —
+// 서버도 같은 규칙으로 본인만 담당으로 넣는다(화면에서 감추는 것이 아니다).
+function openTeacherProgramForm(pr) {
+  if (S.role === 'master') return;
+  S.formOpen = true; S.editing = pr;
+  var ds = pr ? pr.date : S.pick;
+  var box = panelBox();
+  box.innerHTML = '';
+  box.appendChild(el('h2', null, pr ? '내 수업 고치기' : '이날 수업 있어요'));
+
+  var f = el('div', 'form');
+  f.appendChild(el('div', 'pickhint', shortDate(ds).replace('/', '월 ') + '일에 적습니다.'));
+
+  f.appendChild(el('label', null, '제목'));
+  var title = el('input'); title.type = 'text';
+  title.value = pr ? pr.title : '';
+  title.placeholder = '예: 학년 공개수업';
+  f.appendChild(title);
+
+  f.appendChild(el('label', null, '시간'));
+  var two = el('div', 'two');
+  var st = el('input'); st.type = 'time'; st.value = pr ? pr.start : '09:00';
+  var en = el('input'); en.type = 'time'; en.value = pr ? pr.end : '12:00';
+  two.appendChild(st); two.appendChild(en);
+  f.appendChild(two);
+
+  f.appendChild(el('label', null, '조율'));
+  var flex = flexPicker(pr ? Slots.flexOf(pr) : 'unknown');
+  f.appendChild(flex.node);
+  f.appendChild(el('div', 'pickhint', '옮겨도 되는 수업인지 알려 주시면 담당 선생님이 일정을 맞추기 쉬워요.'));
+
+  f.appendChild(el('label', null, '누가 볼 수 있나요'));
+  var vis = pr ? (pr.visibility === 'all' ? 'all' : 'assigned') : 'assigned';
+  var visBox = el('div', 'vispick');
+  var visBtns = {};
+  [['assigned', '나와 담당자만'], ['all', '모두에게']].forEach(function (x) {
+    var vb = el('button', 'slot-btn' + (x[0] === vis ? ' on' : ''), x[1]);
+    vb.addEventListener('click', function () {
+      vis = x[0];
+      Object.keys(visBtns).forEach(function (k) { visBtns[k].classList.toggle('on', k === x[0]); });
+    });
+    visBtns[x[0]] = vb;
+    visBox.appendChild(vb);
+  });
+  f.appendChild(visBox);
+
+  f.appendChild(el('label', null, '메모'));
+  var memo = el('textarea'); memo.value = pr ? (pr.memo || '') : '';
+  f.appendChild(memo);
+
+  var msg = el('div', 'formmsg');
+  var acts = el('div', 'acts');
+  var save = el('button', 'btn-main', '저장');
+  save.addEventListener('click', async function () {
+    msg.className = 'formmsg'; msg.textContent = '';
+    save.disabled = true;
+    var body = {
+      title: title.value, start: st.value, end: en.value,
+      flex: flex.get(), visibility: vis, memo: memo.value
+    };
+    try {
+      if (pr) { body.date = ds; await api('PUT', '/api/programs/' + pr.id, body); }
+      else { body.dates = [ds]; await api('POST', '/api/programs', body); }
+      closeForm();
+      await refresh();
+      toast('저장했어요');
+    } catch (e) {
+      save.disabled = false;
+      msg.className = 'formmsg bad';
+      msg.textContent = (e.status === 400)
+        ? e.message
+        : '저장하지 못했어요: ' + e.message + ' 잠시 뒤 다시 눌러 주세요.';
+    }
+  });
+  acts.appendChild(save);
+  var cancel = el('button', null, '취소');
+  cancel.addEventListener('click', function () { closeForm(); renderPanel(); });
+  acts.appendChild(cancel);
+  f.appendChild(acts);
+  f.appendChild(msg);
+  box.appendChild(f);
 }
 
 // ── 수업 배정 폼(마스터) ─────────────────────────────
@@ -1278,6 +1443,10 @@ function openProgramForm(pr, plan) {
   var holWarn = el('div', 'holwarn hide');
   f.appendChild(holWarn);
 
+  // 그날 이미 잡혀 있는 수업. 겹쳐 잡을지 판단하시라고 보여 줄 뿐 막지 않는다.
+  var sameDay = el('div', 'sameday');
+  f.appendChild(sameDay);
+
   f.appendChild(el('label', null, '시간'));
   var two = el('div', 'two');
   var st = el('input'); st.type = 'time'; st.value = pr ? pr.start : '09:00';
@@ -1288,11 +1457,8 @@ function openProgramForm(pr, plan) {
   f.appendChild(el('label', null, '담당 선생님'));
   var checks = el('div', 'checks');
   var boxes = [];
-  // 조율이 수월한 분부터 눈에 들어오게 등급 순으로 세운다
-  // (자유로움 → 어느 정도 → 확인 필요 → 조율 어려움). 담당자 자신은 늘 맨 앞.
-  var ordered = realTeachers().slice().sort(function (a, b) {
-    return GRADES[gradeOf(a)].order - GRADES[gradeOf(b)].order;
-  });
+  // 명단 순 그대로 세운다. 사람에게는 등급을 매기지 않는다 — 조율은 수업에 붙는다.
+  var ordered = realTeachers();
   var whenSpans = [];   // 폼의 날짜가 바뀌면 이 자리들만 다시 적는다
   ordered.forEach(function (t) {
     var lab = el('label');
@@ -1302,14 +1468,17 @@ function openProgramForm(pr, plan) {
     boxes.push(cb);
     lab.appendChild(cb);
     lab.appendChild(document.createTextNode((t.name || '이름 없음') + (t.cls ? ' · ' + t.cls : '')));
-    lab.appendChild(gradeDot(t));
-    lab.appendChild(el('span', 'g-name', GRADES[gradeOf(t)].label));
     var when = el('span', 'when');
     whenSpans.push({ id: t.id, node: when });
     lab.appendChild(when);
     checks.appendChild(lab);
   });
   f.appendChild(checks);
+
+  // 조율 — 이 수업을 옮길 수 있는지. 모르면 '확인 필요' 로 두고 나중에 담당 선생님이 고친다.
+  f.appendChild(el('label', null, '조율'));
+  var flex = flexPicker(pr ? Slots.flexOf(pr) : 'unknown');
+  f.appendChild(flex.node);
 
   // 그 날짜에 이미 안 된다고 적어 둔 분을 이름 옆에 회색으로 알려 준다.
   // 고른 날이 쉬는 날이면 노란 상자로 확인만 구한다 — 막지는 않는다.
@@ -1319,6 +1488,13 @@ function openProgramForm(pr, plan) {
     whenSpans.forEach(function (x) {
       x.node.textContent = ds ? statusOf(x.id, ds).formLabel : '';
     });
+
+    // 첫 날짜에 이미 있는 수업(지금 고치고 있는 수업 자신은 뺀다)
+    sameDay.innerHTML = '';
+    var already = ds ? sameDayLines(S.programs.filter(function (x) {
+      return !pr || x.id !== pr.id;
+    }), ds, nameOf) : [];
+    already.forEach(function (line) { sameDay.appendChild(el('div', null, line)); });
 
     var hits = [].slice.call(dates.querySelectorAll('input'))
       .map(function (i) { return i.value; })
@@ -1375,7 +1551,7 @@ function openProgramForm(pr, plan) {
     if (joinCb.checked) picked.push('master');
     var ds = [].slice.call(dates.querySelectorAll('input')).map(function (i) { return i.value; }).filter(Boolean);
     var body = {
-      title: title.value, start: st.value, end: en.value,
+      title: title.value, start: st.value, end: en.value, flex: flex.get(),
       teacherIds: picked, visibility: visCb.checked ? 'all' : 'assigned', memo: memo.value
     };
     save.disabled = true;
@@ -1576,6 +1752,19 @@ function openLabel(g) {
   if (g.openCount === 0) return '';
   return g.openCount === g.programs.length ? '전체 공개' : '일부 공개';
 }
+// 조율 열 — 회차마다 다를 수 있다. 다르면 하나로 뭉뚱그리지 않고 '섞임' 이라 적는다.
+function rowFlex(g) {
+  var seen = [];
+  g.programs.forEach(function (p) {
+    var f = Slots.flexOf(p);
+    if (seen.indexOf(f) < 0) seen.push(f);
+  });
+  return seen.length === 1 ? seen[0] : null;
+}
+// 선생님이 스스로 적은 수업인가(담당 열에 색점 없이 이름만 적는다)
+function madeByTeacher(g) {
+  return g.programs.every(function (p) { return Slots.createdByOf(p) !== 'master'; });
+}
 
 async function renderPrograms() {
   var msg = $('pg-msg');
@@ -1729,7 +1918,7 @@ function drawSummary() {
   var table = el('table');
   var thead = el('thead');
   var htr = el('tr');
-  [['프로그램', '30%'], ['담당', '24%'], ['날짜', ''], ['공개', '12%']].forEach(function (h) {
+  [['프로그램', '26%'], ['담당', '20%'], ['조율', '13%'], ['날짜', ''], ['공개', '11%']].forEach(function (h) {
     var th = el('th', null, h[0]);
     if (h[1]) th.style.width = h[1];
     htr.appendChild(th);
@@ -1749,17 +1938,29 @@ function drawSummary() {
       return (a === 'master' ? -1 : 0) - (b === 'master' ? -1 : 0);
     });
     if (!ids.length) who.appendChild(el('span', 'empty', '담당 미정'));
+    var plainNames = madeByTeacher(g);
     ids.forEach(function (id) {
       var t = teacherOf(id);
       var s = el('span');
-      var dot = el('span', 'dot');
-      dot.style.background = t ? t.color : '#8a8f85';
-      s.appendChild(dot);
+      // 선생님이 스스로 적은 수업은 담당 열에 이름만 적는다 — 담당자가 배정한 것이 아니다
+      if (!plainNames) {
+        var dot = el('span', 'dot');
+        dot.style.background = t ? t.color : '#8a8f85';
+        s.appendChild(dot);
+      }
       s.appendChild(document.createTextNode(nameOf(id)));
       who.appendChild(s);
     });
     tdWho.appendChild(who);
     tr.appendChild(tdWho);
+
+    var tdFlex = el('td');
+    var f = rowFlex(g);
+    var fdot = el('span', 'fdot f-' + (f || 'unknown'));
+    fdot.style.marginRight = '5px';
+    tdFlex.appendChild(fdot);
+    tdFlex.appendChild(document.createTextNode(f ? Slots.FLEX_LABEL[f] : '섞임'));
+    tr.appendChild(tdFlex);
 
     var tdDates = el('td');
     var pills = el('div', 'pills');
@@ -1986,23 +2187,6 @@ function drawTeacherRows(dupIds, errRow, errMsg) {
     td4.appendChild(col);
     tr.appendChild(td4);
 
-    // 조율 등급 — 담당자만 보는 값이다(선생님 응답에는 아예 담기지 않는다)
-    var tdG = el('td');
-    if (t.id === 'master') {
-      tdG.appendChild(el('span', 'who', '—'));
-    } else {
-      var sel = el('select', 'grade-select');
-      ['free', 'some', 'unknown', 'hard'].forEach(function (g) {
-        var op = el('option', null, GRADES[g].label);
-        op.value = g;
-        if ((t.grade || 'unknown') === g) op.selected = true;
-        sel.appendChild(op);
-      });
-      sel.addEventListener('change', function () { t.grade = sel.value; });
-      tdG.appendChild(sel);
-    }
-    tr.appendChild(tdG);
-
     var td5 = el('td');
     if (t.id !== 'master') {
       var x = el('button', 'btn-danger', '삭제');
@@ -2024,7 +2208,7 @@ $('hol-add').addEventListener('click', function () {
 $('tea-add').addEventListener('click', function () {
   // 아직 안 쓴 팔레트 색부터 준다 — 연달아 추가해도 같은 색이 겹치지 않는다
   var used = setupRows.map(function (r) { return r.color; }).filter(Boolean);
-  setupRows.push({ id: '', name: '', cls: '', code: '', color: pickColor(used), grade: 'unknown' });
+  setupRows.push({ id: '', name: '', cls: '', code: '', color: pickColor(used) });
   drawTeacherRows([]);
 });
 $('setup-save').addEventListener('click', async function () {

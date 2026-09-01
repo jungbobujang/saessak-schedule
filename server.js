@@ -170,6 +170,16 @@ function shareBlock(b) {
   return out;
 }
 
+// 조율 등급(flex)과 만든 사람(createdBy)은 옛 자료에 없다. 파일을 고치는 마이그레이션
+// 대신 **내보낼 때** 기본값을 채운다 — 화면은 늘 값이 있다고 보고 그릴 수 있다.
+function shapeProgram(p, keepPlanId) {
+  var out = {};
+  Object.keys(p).forEach(function (k) { if (keepPlanId || k !== 'planId') out[k] = p[k]; });
+  out.flex = Slots.flexOf(p);
+  out.createdBy = Slots.createdByOf(p);
+  return out;
+}
+
 // 요청자 시점 필터. 선생님에게는 남의 '안 되는 날'을 그 사람이 알리기로 한 만큼만 담는다.
 function filterFor(session, d, range) {
   var inRange = function (dt) { return dt >= range.from && dt <= range.to; };
@@ -181,25 +191,24 @@ function filterFor(session, d, range) {
     var id = session.teacherId;
     programs = programs.filter(function (p) {
       return (p.teacherIds || []).indexOf(id) >= 0 || p.visibility === 'all';
-    }).map(function (p) {
-      // planId 는 담당자의 신청 관리용 값이다. 선생님 응답에는 담지 않는다.
-      var out = {};
-      Object.keys(p).forEach(function (k) { if (k !== 'planId') out[k] = p[k]; });
-      return out;
-    });
+    // planId 는 담당자의 신청 관리용 값이다. 선생님 응답에는 담지 않는다.
+    }).map(function (p) { return shapeProgram(p, false); });
     blocks = blocks.map(function (b) {
       return b.teacherId === id ? b : shareBlock(b);   // 내 것은 그대로, 남의 것은 걸러서
     }).filter(Boolean);
+  } else {
+    programs = programs.map(function (p) { return shapeProgram(p, true); });
   }
   return { programs: programs, blocks: blocks };
 }
 
-// 선생님에게 나가는 명단에는 code 도 grade 도 넣지 않는다.
-// 화면에서 감추는 것이 아니라 **응답에 아예 담지 않는다** — 등급은 담당자만 보는 값이다.
+// 선생님에게 나가는 명단에는 code 를 넣지 않는다.
+// 화면에서 감추는 것이 아니라 **응답에 아예 담지 않는다**.
+// grade(사람 등급)는 v2.3부터 아무에게도 내보내지 않는다 — 조율은 수업에 붙는다.
 function publicTeachers(session, d) {
   return d.room.teachers.map(function (t) {
     var out = { id: t.id, name: t.name, cls: t.cls, color: t.color };
-    if (session.role === 'master') { out.code = t.code; out.grade = t.grade; }
+    if (session.role === 'master') out.code = t.code;
     return out;
   });
 }
@@ -354,24 +363,41 @@ app.delete('/api/plans/:id', requireAuth, requireMaster, function (req, res) {
   res.json({ ok: true });
 });
 
-// ===== 수업(programs) — 마스터 전용 =====
+// ===== 수업(programs) =====
+// 담당자는 누구에게든 배정할 수 있고, 선생님은 **자기 수업만** 적을 수 있다.
+// 조율 등급은 값이 없으면 '확인 필요' 지만, 엉뚱한 값이면 조용히 바꾸지 않고 되돌린다.
+var FLEX_ERROR = '조율은 옮겨도 됨·어느 정도·옮길 수 없음·확인 필요 중에서 골라 주세요.';
+// 이 수업을 고치거나 지울 수 있는가. 선생님은 자기가 만든 것만이다 —
+// 담당자가 잡아 준 수업을 선생님이 말없이 고치면 담당자의 판이 어긋난다.
+function canEditProgram(session, p) {
+  return session.role === 'master' || Slots.createdByOf(p) === session.teacherId;
+}
+var NOT_MINE = '담당 선생님이 잡은 수업은 고칠 수 없어요.';
+
 // 같은 제목·시간으로 여러 날짜를 한 번에 만들 수 있다(dates 배열).
-app.post('/api/programs', requireAuth, requireMaster, function (req, res) {
+app.post('/api/programs', requireAuth, function (req, res) {
   var b = req.body || {};
   var dates = Array.isArray(b.dates) && b.dates.length ? b.dates : [b.date];
   dates = dates.filter(function (x) { return isDate(x); });
   if (!dates.length) return res.status(400).json({ error: '날짜를 확인해 주세요.' });
   if (!isTime(b.start) || !isTime(b.end)) return res.status(400).json({ error: '시간을 확인해 주세요. (예: 09:00)' });
   if (b.end <= b.start) return res.status(400).json({ error: '끝 시간이 시작 시간보다 빨라요.' });
+  if (b.flex !== undefined && !Slots.isFlex(b.flex)) return res.status(400).json({ error: FLEX_ERROR });
 
   var d = store.load();
+  var isMaster = req.session.role === 'master';
   var known = d.room.teachers.map(function (t) { return t.id; });
-  var teacherIds = (Array.isArray(b.teacherIds) ? b.teacherIds : []).filter(function (id) { return known.indexOf(id) >= 0; });
+  // 선생님이 적는 수업의 담당은 언제나 본인이다. 남을 담당으로 넣어 보내와도 받지 않는다 —
+  // 화면에서 막는 것이 아니라 여기서 값을 정한다.
+  var teacherIds = isMaster
+    ? (Array.isArray(b.teacherIds) ? b.teacherIds : []).filter(function (id) { return known.indexOf(id) >= 0; })
+    : [req.session.teacherId];
 
   // 예정 목록에서 잡은 수업이면 어느 plan 에서 왔는지 들고 간다.
   // 사이에 그 plan 이 지워졌다면 조용히 빈 값으로 둔다 — 수업 자체는 만들어져야 한다.
+  // 선생님에게는 예정 목록 자체가 없으므로 planId 를 보내와도 담지 않는다.
   var planId = '';
-  if (b.planId) {
+  if (isMaster && b.planId) {
     var pl = d.room.plans.filter(function (x) { return x.id === b.planId; })[0];
     if (pl) planId = pl.id;
   }
@@ -386,6 +412,8 @@ app.post('/api/programs', requireAuth, requireMaster, function (req, res) {
       teacherIds: teacherIds,
       visibility: b.visibility === 'all' ? 'all' : 'assigned',
       memo: clean(b.memo, 500),
+      flex: Slots.isFlex(b.flex) ? b.flex : 'unknown',
+      createdBy: isMaster ? 'master' : req.session.teacherId,
       updatedAt: nowIso()
     };
     if (planId) p.planId = planId;
@@ -396,11 +424,13 @@ app.post('/api/programs', requireAuth, requireMaster, function (req, res) {
   res.json({ ok: true, created: made });
 });
 
-app.put('/api/programs/:id', requireAuth, requireMaster, function (req, res) {
+app.put('/api/programs/:id', requireAuth, function (req, res) {
   var d = store.load();
   var p = d.programs.filter(function (x) { return x.id === req.params.id; })[0];
   if (!p) return res.status(404).json({ error: '그 수업을 찾지 못했어요.' });
+  if (!canEditProgram(req.session, p)) return res.status(403).json({ error: NOT_MINE });
   var b = req.body || {};
+  if (b.flex !== undefined && !Slots.isFlex(b.flex)) return res.status(400).json({ error: FLEX_ERROR });
 
   if (b.date !== undefined) {
     if (!isDate(b.date)) return res.status(400).json({ error: '날짜를 확인해 주세요.' });
@@ -418,20 +448,43 @@ app.put('/api/programs/:id', requireAuth, requireMaster, function (req, res) {
   if (b.title !== undefined) p.title = clean(b.title, 80) || '디지털새싹 수업';
   if (b.memo !== undefined) p.memo = clean(b.memo, 500);
   if (b.visibility !== undefined) p.visibility = b.visibility === 'all' ? 'all' : 'assigned';
+  if (b.flex !== undefined) p.flex = b.flex;
   if (Array.isArray(b.teacherIds)) {
-    var known = d.room.teachers.map(function (t) { return t.id; });
-    p.teacherIds = b.teacherIds.filter(function (id) { return known.indexOf(id) >= 0; });
+    if (req.session.role === 'master') {
+      var known = d.room.teachers.map(function (t) { return t.id; });
+      p.teacherIds = b.teacherIds.filter(function (id) { return known.indexOf(id) >= 0; });
+    } else {
+      p.teacherIds = [req.session.teacherId];   // 선생님 수업의 담당은 언제나 본인이다
+    }
   }
   p.updatedAt = nowIso();
   store.save(d);
-  res.json({ ok: true, program: p });
+  res.json({ ok: true, program: shapeProgram(p, req.session.role === 'master') });
 });
 
-app.delete('/api/programs/:id', requireAuth, requireMaster, function (req, res) {
+// 조율 등급만 바꾼다. **본인이 담당인 수업이면 담당자가 잡아 준 것이라도** 바꿀 수 있다 —
+// "이 수업은 옮겨도 돼요" 는 그 수업을 맡은 선생님만 아는 사실이기 때문이다.
+app.patch('/api/programs/:id/flex', requireAuth, function (req, res) {
   var d = store.load();
-  var before = d.programs.length;
+  var p = d.programs.filter(function (x) { return x.id === req.params.id; })[0];
+  if (!p) return res.status(404).json({ error: '그 수업을 찾지 못했어요.' });
+  if (req.session.role !== 'master' && (p.teacherIds || []).indexOf(req.session.teacherId) < 0) {
+    return res.status(403).json({ error: '내가 담당인 수업만 표시할 수 있어요.' });
+  }
+  var b = req.body || {};
+  if (!Slots.isFlex(b.flex)) return res.status(400).json({ error: FLEX_ERROR });
+  p.flex = b.flex;
+  p.updatedAt = nowIso();
+  store.save(d);
+  res.json({ ok: true, program: shapeProgram(p, req.session.role === 'master') });
+});
+
+app.delete('/api/programs/:id', requireAuth, function (req, res) {
+  var d = store.load();
+  var p = d.programs.filter(function (x) { return x.id === req.params.id; })[0];
+  if (!p) return res.status(404).json({ error: '그 수업을 찾지 못했어요.' });
+  if (!canEditProgram(req.session, p)) return res.status(403).json({ error: NOT_MINE });
   d.programs = d.programs.filter(function (x) { return x.id !== req.params.id; });
-  if (d.programs.length === before) return res.status(404).json({ error: '그 수업을 찾지 못했어요.' });
   store.save(d);
   res.json({ ok: true });
 });
@@ -608,20 +661,26 @@ app.put('/api/settings', requireAuth, requireMaster, function (req, res) {
       }
       return store.PALETTE[used.length % store.PALETTE.length];
     }
+    var oldById = {};
+    d.room.teachers.forEach(function (t) { oldById[t.id] = t; });
     b.teachers.forEach(function (t) {
       var id = (t && t.id) || store.genId('t');
       if (seen[id]) return;             // 같은 id 가 두 번 오면 뒤엣것은 버린다
       seen[id] = true;
       var color = (t && t.color) || freeColor();
       if (used.indexOf(color) < 0) used.push(color);
-      next.push({
+      var row = {
         id: id,
         name: clean(t && t.name, 20),
         cls: clean(t && t.cls, 10),
         code: id === 'master' ? '' : String((t && t.code) || '').trim(),
-        color: color,
-        grade: store.normGrade(t && t.grade)
-      });
+        color: color
+      };
+      // 사람 등급(grade)은 v2.3부터 쓰지 않는다. 보내오는 값은 받지 않고,
+      // 파일에 남아 있던 옛 값만 그대로 지고 간다 — 쓰지 않는다고 지우지는 않는다.
+      var old = oldById[id];
+      if (old && old.grade !== undefined) row.grade = old.grade;
+      next.push(row);
     });
     if (!seen['master']) {
       var old = d.room.teachers.filter(function (t) { return t.id === 'master'; })[0];
