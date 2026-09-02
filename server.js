@@ -446,6 +446,17 @@ app.post('/api/programs', requireAuth, function (req, res) {
     if (!mine.length) return res.status(403).json({ error: NOT_MINE });
     skippedMembers = members.length - mine.length;
     seriesId = key;
+    // 회차를 더할 때 담당은 **묶음에서 물려받는다**(보내온 값은 쓰지 않는다).
+    // 여기서 보내온 값을 쓰면, 담당이 여럿인 묶음에 한 사람이 회차를 더했을 때
+    // 그 날짜만 담당이 줄어 다른 선생님 달력에서 사라진다. 회차를 더한 것이지
+    // 배정을 바꾼 것이 아니다 — 배정을 바꾸려면 고치기 폼에서 담당을 고친다.
+    // 어느 회차를 따를지는 **날짜가 가장 빠른 회차**로 정한다(같은 날이면 id 순).
+    // 늘 같은 답이 나와야 회차를 더할 때마다 담당이 달라지지 않는다.
+    var head = members.slice().sort(function (a, x) {
+      if (a.date !== x.date) return a.date < x.date ? -1 : 1;
+      return a.id < x.id ? -1 : 1;
+    })[0];
+    teacherIds = (head.teacherIds || []).filter(function (id) { return known.indexOf(id) >= 0; });
   }
 
   // 예정 목록에서 잡은 수업이면 어느 plan 에서 왔는지 들고 간다.

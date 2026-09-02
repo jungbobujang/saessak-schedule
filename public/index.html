@@ -489,6 +489,17 @@ function pad(n) { return String(n).padStart(2, '0'); }
 function fmt(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function today() { return fmt(new Date()); }
 function shortDate(s) { var p = s.split('-'); return Number(p[1]) + '/' + Number(p[2]); }
+// 저장된 시각(updatedAt)은 UTC ISO 다. 그것을 그대로 잘라 쓰면 우리 아침에 고친 것이
+// 전날로 보인다 — 한국 오전 9시 이전은 UTC 로 아직 어제이기 때문이다. 그래서 여기서
+// 한국 시간으로 옮겨 적는다. 저장 형식은 건드리지 않는다.
+// 한국은 1988년 이후 서머타임이 없어 UTC+9 로 고정이다.
+var KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+function kstShortDate(iso) {
+  var d = new Date(iso);
+  if (!iso || isNaN(d.getTime())) return '';
+  var k = new Date(d.getTime() + KST_OFFSET_MS);
+  return (k.getUTCMonth() + 1) + '/' + k.getUTCDate();
+}
 
 // 저장했다는 말은 잠깐만 있으면 된다. 실패는 폼 안에 남아야 다시 눌러 볼 수 있다.
 var toastTimer = null;
@@ -1203,14 +1214,15 @@ function renderPanel() {
     if (S.role === 'master' || iAmOn) r.appendChild(inlineFlex(pr));
 
     if (S.role === 'master') {
-      // 내가 잡아 둔 수업을 담당 선생님이 고쳤으면 그 사실을 작게 적는다. 값이 달라진
-      // 것만 보이고 누가 바꿨는지 안 보이면, 담당자는 자기가 잘못 적은 줄 안다.
+      // **내가 잡아 둔 수업을** 담당 선생님이 고쳤을 때만 적는다. 값이 달라진 것만
+      // 보이고 누가 바꿨는지 안 보이면, 담당자는 자기가 잘못 적은 줄 안다.
+      // 선생님이 스스로 적은 수업에는 붙이지 않는다 — 처음부터 그분 수업이라
+      // '고침' 이라고 할 것이 없다. 그래서 만든 사람이 나(master)인 것만 본다.
       // 이 줄은 담당자 화면에만 있다 — 선생님 응답에는 updatedBy 가 담기지도 않는다.
-      var by = Slots.updatedByOf(pr);
-      if (by !== 'master') {
-        var when = String(pr.updatedAt || '').slice(0, 10);
-        r.appendChild(el('div', 'who', nameOf(by) + ' 선생님이 고침' +
-          (/^\d{4}-\d{2}-\d{2}$/.test(when) ? ' · ' + shortDate(when) : '')));
+      var by = pr.updatedBy;
+      if (Slots.createdByOf(pr) === 'master' && by && by !== 'master') {
+        var when = kstShortDate(pr.updatedAt);
+        r.appendChild(el('div', 'who', nameOf(by) + ' 선생님이 고침' + (when ? ' · ' + when : '')));
       }
       var edit = el('button', 'btn-sm', '고치기');
       edit.addEventListener('click', function () { openProgramForm(pr); });
@@ -1404,6 +1416,9 @@ function seriesRow(pr, opts) {
   addLine.appendChild(dateIn);
   addLine.appendChild(addBtn);
   box.appendChild(addLine);
+  // 담당은 폼에 적힌 것이 아니라 묶음에서 물려받는다. 폼의 담당 칸을 바꾼 채로
+  // 회차를 더한 사람이 그 회차만 다르게 저장된 줄 모르는 일이 없게 미리 말해 둔다.
+  box.appendChild(el('div', 'pickhint', '회차를 더하면 담당은 이 묶음 그대로 따라갑니다.'));
   var msg = el('div', 'formmsg');
   box.appendChild(msg);
 
