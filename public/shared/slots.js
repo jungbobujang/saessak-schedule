@@ -50,6 +50,10 @@
   function flexLabel(pr) { return FLEX_LABEL[flexOf(pr)]; }
   // 누가 잡은 수업인가. 옛 자료에는 없다 — 그때는 담당자만 수업을 만들 수 있었다.
   function createdByOf(pr) { return (pr && pr.createdBy) ? pr.createdBy : 'master'; }
+  // 마지막으로 고친 사람. 옛 자료에는 이 칸이 없다 — 그때는 만든 사람만 고칠 수 있었으니
+  // 없으면 만든 사람이 곧 마지막으로 고친 사람이다. 없는 값을 '모름' 으로 두면
+  // 담당자 화면에 '(삭제된 선생님)이 고침' 같은 헛말이 붙는다.
+  function updatedByOf(pr) { return (pr && pr.updatedBy) ? pr.updatedBy : createdByOf(pr); }
 
   // 회차 묶음. 여러 날짜로 함께 만든 수업은 같은 seriesId 를 지고 다닌다.
   // 옛 자료에는 이 칸이 없다 — 파일을 고치지 않고 **읽을 때** 제목·담당·시작시간이
@@ -136,7 +140,8 @@
     SLOTS: SLOTS, LABEL: LABEL, NOON: NOON, EMPTY_MEMO: EMPTY_MEMO,
     VIS: VIS, VIS_HINT: VIS_HINT,
     FLEX: FLEX, FLEX_LABEL: FLEX_LABEL,
-    isFlex: isFlex, flexOf: flexOf, flexLabel: flexLabel, createdByOf: createdByOf,
+    isFlex: isFlex, flexOf: flexOf, flexLabel: flexLabel,
+    createdByOf: createdByOf, updatedByOf: updatedByOf,
     seriesKeyOf: seriesKeyOf, seriesOf: seriesOf,
     isSlot: isSlot, slotOf: slotOf, memoOf: memoOf, slotLabel: slotLabel,
     isVis: isVis, visOf: visOf, narrowestVis: narrowestVis,

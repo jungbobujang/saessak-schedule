@@ -170,13 +170,21 @@ function shareBlock(b) {
   return out;
 }
 
-// 조율 등급(flex)과 만든 사람(createdBy)은 옛 자료에 없다. 파일을 고치는 마이그레이션
-// 대신 **내보낼 때** 기본값을 채운다 — 화면은 늘 값이 있다고 보고 그릴 수 있다.
-function shapeProgram(p, keepPlanId) {
+// 조율 등급(flex)·만든 사람(createdBy)·고친 사람(updatedBy)은 옛 자료에 없다. 파일을
+// 고치는 마이그레이션 대신 **내보낼 때** 기본값을 채운다 — 화면은 늘 값이 있다고 보고 그린다.
+//
+// planId 와 updatedBy 는 담당자의 운영용 값이라 선생님 응답에는 **담지 않는다**.
+// 누가 언제 고쳤는지는 판을 맞추는 담당자가 볼 일이지, 다른 선생님이 볼 일이 아니다 —
+// 화면에서 감추는 것이 아니라 응답에 아예 넣지 않는다.
+function shapeProgram(p, forMaster) {
   var out = {};
-  Object.keys(p).forEach(function (k) { if (keepPlanId || k !== 'planId') out[k] = p[k]; });
+  Object.keys(p).forEach(function (k) {
+    if (!forMaster && (k === 'planId' || k === 'updatedBy')) return;
+    out[k] = p[k];
+  });
   out.flex = Slots.flexOf(p);
   out.createdBy = Slots.createdByOf(p);
+  if (forMaster) out.updatedBy = Slots.updatedByOf(p);
   return out;
 }
 
@@ -367,12 +375,39 @@ app.delete('/api/plans/:id', requireAuth, requireMaster, function (req, res) {
 // 담당자는 누구에게든 배정할 수 있고, 선생님은 **자기 수업만** 적을 수 있다.
 // 조율 등급은 값이 없으면 '확인 필요' 지만, 엉뚱한 값이면 조용히 바꾸지 않고 되돌린다.
 var FLEX_ERROR = '조율은 옮겨도 됨·어느 정도·옮길 수 없음·확인 필요 중에서 골라 주세요.';
-// 이 수업을 고치거나 지울 수 있는가. 선생님은 자기가 만든 것만이다 —
-// 담당자가 잡아 준 수업을 선생님이 말없이 고치면 담당자의 판이 어긋난다.
+// 이 수업을 고칠 수 있는가. v2.5부터 **본인이 담당인 수업이면** 담당자가 잡아 준
+// 것이라도 고칠 수 있다 — 시간이 바뀌었다는 사실을 가장 먼저 아는 사람은 그 수업을
+// 하는 선생님이다. 못 고치게 막아 두면 그 사실이 판에 들어오지 못한다.
+// 다만 **담당 목록(teacherIds)만은 담당자가 정한다** — 아래 PUT 에서 선생님이 보낸
+// teacherIds 는 받지 않는다. 자기를 빼거나 남을 끌어들이는 것은 배정이지 수정이 아니다.
 function canEditProgram(session, p) {
+  if (session.role === 'master') return true;
+  if (Slots.createdByOf(p) === session.teacherId) return true;
+  return (p.teacherIds || []).indexOf(session.teacherId) >= 0;
+}
+// 지우는 것은 다르다. **만든 사람만** 지운다 — 담당자가 잡아 준 수업을 선생님이
+// 지우면 담당자의 판에서 그 수업이 말없이 사라진다. 고치면 흔적이 남지만 지우면 없다.
+function canDeleteProgram(session, p) {
   return session.role === 'master' || Slots.createdByOf(p) === session.teacherId;
 }
-var NOT_MINE = '담당 선생님이 잡은 수업은 고칠 수 없어요.';
+var NOT_MINE = '내가 담당인 수업만 고칠 수 있어요.';
+var NOT_MADE = '이 수업은 만든 사람만 지울 수 있어요. 담당 선생님께 말씀해 주세요.';
+
+// 선생님이 보내온 담당 목록을 받아 줄 수 있는 값으로 정한다.
+// 허락하는 것은 **[본인]** 과 **[본인, 담당자]** 두 가지뿐이다. 뒤엣것은 폼의
+// '담당 선생님과 함께하는 수업' 이고, 그래야 담당자의 안 되는 날과 겹치는지 본다.
+// 그 밖의 값(남을 끼워 보낸 것)은 되돌리지 않고 [본인]으로 정한다 — 선생님 폼에는
+// 남을 고르는 칸 자체가 없으므로 사람이 고른 값이 아니라 보내온 값일 뿐이다.
+function ownTeacherIds(ids, meId) {
+  var list = Array.isArray(ids) ? ids : [];
+  var seen = {};
+  list.forEach(function (x) { seen[String(x)] = true; });
+  var keys = Object.keys(seen);
+  if (!keys.length) return [meId];
+  var onlyMineAndMaster = seen[meId] && keys.every(function (k) { return k === meId || k === 'master'; });
+  if (!onlyMineAndMaster) return [meId];
+  return seen['master'] ? [meId, 'master'] : [meId];
+}
 
 // 같은 제목·시간으로 여러 날짜를 한 번에 만들 수 있다(dates 배열).
 app.post('/api/programs', requireAuth, function (req, res) {
@@ -387,23 +422,29 @@ app.post('/api/programs', requireAuth, function (req, res) {
   var d = store.load();
   var isMaster = req.session.role === 'master';
   var known = d.room.teachers.map(function (t) { return t.id; });
-  // 선생님이 적는 수업의 담당은 언제나 본인이다. 남을 담당으로 넣어 보내와도 받지 않는다 —
-  // 화면에서 막는 것이 아니라 여기서 값을 정한다.
+  // 선생님이 적는 수업의 담당은 본인, 또는 본인과 담당자다. 남을 담당으로 넣어 보내와도
+  // 받지 않는다 — 화면에서 막는 것이 아니라 여기서 값을 정한다.
   var teacherIds = isMaster
     ? (Array.isArray(b.teacherIds) ? b.teacherIds : []).filter(function (id) { return known.indexOf(id) >= 0; })
-    : [req.session.teacherId];
+    : ownTeacherIds(b.teacherIds, req.session.teacherId);
 
   // 회차 묶음. 한 번에 여러 날짜를 만들면 그것이 하나의 묶음이고, 한 날짜만 만들어도
   // 자기만의 묶음이다(나중에 [+ 날짜 추가] 로 회차를 붙일 수 있다).
   // seriesId 를 들고 오면 이미 있는 묶음에 붙이는 것이다 — 남의 묶음에는 붙이지 못한다.
+  //
+  // 붙일 수 있는 기준은 고치기와 같다: **묶음 안에 내가 담당인 회차가 하나라도 있으면**
+  // 그 묶음은 내 수업이다. 담당이 섞인 묶음(내가 몇 회차만 맡은 연속 수업)에서
+  // 전부 내 것이어야 한다고 막으면, 정작 그 수업을 하는 사람이 회차를 더하지 못한다.
+  // 내 담당이 아닌 회차는 여기서 손대지 않으므로 그 수만 skipped 로 알려 준다.
   var seriesId = store.genId('s');
+  var skippedMembers = 0;
   if (b.seriesId) {
     var key = String(b.seriesId);
     var members = d.programs.filter(function (x) { return Slots.seriesKeyOf(x) === key; });
     if (!members.length) return res.status(404).json({ error: '그 수업 묶음을 찾지 못했어요.' });
-    if (!members.every(function (x) { return canEditProgram(req.session, x); })) {
-      return res.status(403).json({ error: NOT_MINE });
-    }
+    var mine = members.filter(function (x) { return canEditProgram(req.session, x); });
+    if (!mine.length) return res.status(403).json({ error: NOT_MINE });
+    skippedMembers = members.length - mine.length;
     seriesId = key;
   }
 
@@ -428,6 +469,7 @@ app.post('/api/programs', requireAuth, function (req, res) {
       memo: clean(b.memo, 500),
       flex: Slots.isFlex(b.flex) ? b.flex : 'unknown',
       createdBy: isMaster ? 'master' : req.session.teacherId,
+      updatedBy: isMaster ? 'master' : req.session.teacherId,
       seriesId: seriesId,
       updatedAt: nowIso()
     };
@@ -436,7 +478,7 @@ app.post('/api/programs', requireAuth, function (req, res) {
   });
   d.programs = d.programs.concat(made);
   store.save(d);
-  res.json({ ok: true, created: made });
+  res.json({ ok: true, created: made, skipped: skippedMembers });
 });
 
 app.put('/api/programs/:id', requireAuth, function (req, res) {
@@ -448,13 +490,17 @@ app.put('/api/programs/:id', requireAuth, function (req, res) {
 
   // 어디에 적을지 먼저 정한다. applyToSeries 는 **날짜만 빼고** 묶음 전체에 적는다 —
   // 회차의 날짜는 회차마다 다른 것이 당연하므로 함께 옮기면 묶음이 한 날에 겹친다.
+  //
+  // 묶음에 내 담당이 아닌 회차가 섞여 있으면 **그 회차만 건너뛰고 나머지에 적는다.**
+  // 통째로 되돌리면 고칠 수 있는 회차까지 못 고치고, 말없이 다 고치면 남의 회차를
+  // 건드린다. 몇 개를 건너뛰었는지는 skipped 로 돌려 준다 — 조용히 넘어가지 않는다.
   var targets = [p];
+  var skipped = 0;
   if (b.applyToSeries) {
     var key = Slots.seriesKeyOf(p);
-    targets = d.programs.filter(function (x) { return Slots.seriesKeyOf(x) === key; });
-    if (!targets.every(function (x) { return canEditProgram(req.session, x); })) {
-      return res.status(403).json({ error: NOT_MINE });
-    }
+    var members = d.programs.filter(function (x) { return Slots.seriesKeyOf(x) === key; });
+    targets = members.filter(function (x) { return canEditProgram(req.session, x); });
+    skipped = members.length - targets.length;
   }
 
   // 값은 **모두 검사한 뒤에** 한꺼번에 적는다. 중간에 되돌아가면 일부 회차만 바뀐 채
@@ -478,11 +524,13 @@ app.put('/api/programs/:id', requireAuth, function (req, res) {
     if (b.memo !== undefined) x.memo = clean(b.memo, 500);
     if (b.visibility !== undefined) x.visibility = b.visibility === 'all' ? 'all' : 'assigned';
     if (b.flex !== undefined) x.flex = b.flex;
-    if (Array.isArray(b.teacherIds)) {
-      x.teacherIds = (req.session.role === 'master')
-        ? b.teacherIds.filter(function (id) { return known.indexOf(id) >= 0; })
-        : [req.session.teacherId];              // 선생님 수업의 담당은 언제나 본인이다
+    // 담당 목록은 **담당자만** 바꾼다. 선생님이 보내와도 여기서 그냥 지나간다 —
+    // 되돌리지 않는 이유는, 담당을 바꾸려던 것이 아니라 폼이 들고 있던 값을 그대로
+    // 실어 보낸 것이기 때문이다. 대신 화면 쪽에서 그 칸을 만질 수 없게 해 둔다.
+    if (Array.isArray(b.teacherIds) && req.session.role === 'master') {
+      x.teacherIds = b.teacherIds.filter(function (id) { return known.indexOf(id) >= 0; });
     }
+    x.updatedBy = req.session.teacherId;
     x.updatedAt = nowIso();
   });
   if (b.date !== undefined) p.date = b.date;   // 날짜는 이 회차만
@@ -490,7 +538,8 @@ app.put('/api/programs/:id', requireAuth, function (req, res) {
   res.json({
     ok: true,
     program: shapeProgram(p, req.session.role === 'master'),
-    updated: targets.length
+    updated: targets.length,
+    skipped: skipped
   });
 });
 
@@ -506,6 +555,7 @@ app.patch('/api/programs/:id/flex', requireAuth, function (req, res) {
   var b = req.body || {};
   if (!Slots.isFlex(b.flex)) return res.status(400).json({ error: FLEX_ERROR });
   p.flex = b.flex;
+  p.updatedBy = req.session.teacherId;
   p.updatedAt = nowIso();
   store.save(d);
   res.json({ ok: true, program: shapeProgram(p, req.session.role === 'master') });
@@ -518,8 +568,10 @@ app.delete('/api/programs/series/:seriesId', requireAuth, function (req, res) {
   var key = String(req.params.seriesId);
   var members = d.programs.filter(function (x) { return Slots.seriesKeyOf(x) === key; });
   if (!members.length) return res.status(404).json({ error: '그 수업 묶음을 찾지 못했어요.' });
-  if (!members.every(function (x) { return canEditProgram(req.session, x); })) {
-    return res.status(403).json({ error: NOT_MINE });
+  // 지우기는 고치기와 기준이 다르다 — 묶음을 통째로 지우려면 **전부 내가 만든 것**이어야
+  // 한다. 담당이라는 이유로 남이 만든 회차까지 함께 지우면 되돌릴 길이 없다.
+  if (!members.every(function (x) { return canDeleteProgram(req.session, x); })) {
+    return res.status(403).json({ error: NOT_MADE });
   }
   var ids = {};
   members.forEach(function (x) { ids[x.id] = true; });
@@ -532,7 +584,7 @@ app.delete('/api/programs/:id', requireAuth, function (req, res) {
   var d = store.load();
   var p = d.programs.filter(function (x) { return x.id === req.params.id; })[0];
   if (!p) return res.status(404).json({ error: '그 수업을 찾지 못했어요.' });
-  if (!canEditProgram(req.session, p)) return res.status(403).json({ error: NOT_MINE });
+  if (!canDeleteProgram(req.session, p)) return res.status(403).json({ error: NOT_MADE });
   d.programs = d.programs.filter(function (x) { return x.id !== req.params.id; });
   store.save(d);
   res.json({ ok: true });

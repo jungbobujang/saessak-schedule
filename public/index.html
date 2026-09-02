@@ -1203,23 +1203,36 @@ function renderPanel() {
     if (S.role === 'master' || iAmOn) r.appendChild(inlineFlex(pr));
 
     if (S.role === 'master') {
+      // 내가 잡아 둔 수업을 담당 선생님이 고쳤으면 그 사실을 작게 적는다. 값이 달라진
+      // 것만 보이고 누가 바꿨는지 안 보이면, 담당자는 자기가 잘못 적은 줄 안다.
+      // 이 줄은 담당자 화면에만 있다 — 선생님 응답에는 updatedBy 가 담기지도 않는다.
+      var by = Slots.updatedByOf(pr);
+      if (by !== 'master') {
+        var when = String(pr.updatedAt || '').slice(0, 10);
+        r.appendChild(el('div', 'who', nameOf(by) + ' 선생님이 고침' +
+          (/^\d{4}-\d{2}-\d{2}$/.test(when) ? ' · ' + shortDate(when) : '')));
+      }
       var edit = el('button', 'btn-sm', '고치기');
       edit.addEventListener('click', function () { openProgramForm(pr); });
       var acts0 = el('div', 'rowacts'); acts0.appendChild(edit);
       r.appendChild(acts0);
-    } else if (Slots.createdByOf(pr) === S.me.id) {
-      // 내가 적은 수업만 고치고 지운다. 담당자가 잡아 준 수업은 조율 표시까지다.
+    } else if (iAmOn || Slots.createdByOf(pr) === S.me.id) {
+      // 내가 담당인 수업이면 담당 선생님이 잡아 준 것이라도 고칠 수 있다(v2.5).
+      // 지우는 것은 여전히 내가 적은 것만이다 — 남이 잡아 준 수업을 내가 지우면
+      // 그 판에서 말없이 사라진다. 그럴 때는 폼 안에 어디에 말하면 되는지가 적힌다.
       var acts1 = el('div', 'rowacts');
       var edit2 = el('button', 'btn-sm', '고치기');
       edit2.addEventListener('click', function () { openTeacherProgramForm(pr); });
       acts1.appendChild(edit2);
-      var del2 = el('button', 'btn-sm btn-danger', '지우기');
-      del2.addEventListener('click', async function () {
-        if (!window.confirm('이 수업을 지울까요?')) return;
-        try { await api('DELETE', '/api/programs/' + pr.id); await refresh(); toast('지웠어요'); }
-        catch (e) { alert('지우지 못했어요: ' + e.message); }
-      });
-      acts1.appendChild(del2);
+      if (Slots.createdByOf(pr) === S.me.id) {
+        var del2 = el('button', 'btn-sm btn-danger', '지우기');
+        del2.addEventListener('click', async function () {
+          if (!window.confirm('이 수업을 지울까요?')) return;
+          try { await api('DELETE', '/api/programs/' + pr.id); await refresh(); toast('지웠어요'); }
+          catch (e) { alert('지우지 못했어요: ' + e.message); }
+        });
+        acts1.appendChild(del2);
+      }
       r.appendChild(acts1);
     }
     box.appendChild(r);
@@ -1445,6 +1458,14 @@ function seriesRow(pr, opts) {
   return { node: box, count: function () { return members.length; } };
 }
 
+// 묶음에 적을 때 내 담당이 아니라 건너뛴 회차가 있으면 그 사실을 말로 만든다.
+// 서버가 skipped 로 알려 준다 — 조용히 삼키면 안 바뀐 회차가 있는 줄 모르고 넘어간다.
+function skipNote(r) {
+  var n = (r && r.skipped) || 0;
+  if (!n) return '';
+  return '저장했어요 · 내 담당이 아닌 회차 ' + n + '개는 그대로 두었어요';
+}
+
 // 상세 카드 안 인라인 조율 단추 — 누르면 그 자리에서 바로 저장된다.
 // 담당자는 수업을 통째로 고칠 수 있으니 PUT, 선생님은 조율만 바꾸는 PATCH 를 쓴다.
 function inlineFlex(pr) {
@@ -1517,15 +1538,44 @@ function openTeacherProgramForm(pr) {
   });
   f.appendChild(visBox);
 
+  // 담당 선생님도 함께 하는 수업인가. 켜면 담당이 나와 담당 선생님 둘이 되고, 그래야
+  // 담당 선생님이 그날 안 된다고 적어 두었을 때 겹침으로 걸린다.
+  // 고칠 때는 만질 수 없다 — 이미 만든 수업의 담당은 담당 선생님이 정하는 것이라
+  // 서버가 선생님의 수정에서는 담당 목록을 받지 않는다. 눌리는데 저장되지 않는 칸을
+  // 두는 것이 가장 나쁘므로, 지금 값을 보여 주되 잠가 둔다.
+  var withMaster = el('div', 'vis');
+  var wmLab = el('label');
+  var wmCb = el('input'); wmCb.type = 'checkbox';
+  if (pr && (pr.teacherIds || []).indexOf('master') >= 0) wmCb.checked = true;
+  var mn = masterName();
+  wmLab.appendChild(wmCb);
+  wmLab.appendChild(document.createTextNode('담당 선생님과 함께하는 수업'));
+  withMaster.appendChild(wmLab);
+  if (pr) {
+    wmCb.disabled = true;
+    withMaster.appendChild(el('div', 'hint', '이미 적은 수업의 담당은 여기서 바꿀 수 없어요. ' +
+      (mn ? mn + ' 선생님께' : '담당 선생님께') + ' 말씀해 주세요.'));
+  } else {
+    withMaster.appendChild(el('div', 'hint',
+      '켜면 ' + (mn ? mn + ' 선생님' : '담당 선생님') + ' 일정에도 들어갑니다'));
+  }
+  f.appendChild(withMaster);
+
   f.appendChild(el('label', null, '메모'));
   var memo = el('textarea'); memo.value = pr ? (pr.memo || '') : '';
   f.appendChild(memo);
 
   function formBody() {
-    return {
+    var out = {
       title: title.value, start: time.start.get(), end: time.end.get(),
       flex: flex.get(), visibility: vis, memo: memo.value
     };
+    // 담당은 늘 실어 보낸다. 고칠 때(PUT)는 서버가 받지 않지만, 이 값은 잠긴 칸에서
+    // 온 지금 저장된 값 그대로라 어긋날 수가 없다. 그리고 같은 값을 [+ 날짜 추가]
+    // (POST)가 쓴다 — 함께하는 수업에 회차를 더했더니 그 회차만 나 혼자가 되어 있으면
+    // 담당 선생님 달력에서 그 날짜만 사라진다.
+    out.teacherIds = wmCb.checked ? [S.me.id, 'master'] : [S.me.id];
+    return out;
   }
 
   var msg = el('div', 'formmsg');
@@ -1538,11 +1588,14 @@ function openTeacherProgramForm(pr) {
     var body = formBody();
     if (pr && applyCb.checked) body.applyToSeries = true;
     try {
-      if (pr) { body.date = ds; await api('PUT', '/api/programs/' + pr.id, body); }
-      else { body.dates = [ds]; await api('POST', '/api/programs', body); }
+      var r;
+      if (pr) { body.date = ds; r = await api('PUT', '/api/programs/' + pr.id, body); }
+      else { body.dates = [ds]; r = await api('POST', '/api/programs', body); }
       closeForm();
       await refresh();
-      toast('저장했어요');
+      // 건너뛴 회차가 있으면 그냥 넘어가지 않는다 — 모두 적용한 줄 알고 넘어가면
+      // 어긋난 회차가 남는다. 몇 개가 남았는지 말해 주고 담당 선생님께 넘긴다.
+      toast(skipNote(r) || '저장했어요');
     } catch (e) {
       save.disabled = false;
       msg.className = 'formmsg bad';
@@ -1556,8 +1609,18 @@ function openTeacherProgramForm(pr) {
   cancel.addEventListener('click', function () { closeForm(); renderPanel(); });
   acts.appendChild(cancel);
 
+  // 지우는 것은 **만든 사람만** 한다. 담당 선생님이 잡아 준 수업을 내가 지우면
+  // 담당 선생님의 판에서 그 수업이 말없이 사라진다 — 고친 것은 흔적이 남지만
+  // 지운 것은 남지 않는다. 그래서 여기서는 단추 대신 어디에 말하면 되는지를 적는다.
+  var iMade = Slots.createdByOf(pr) === S.me.id;
+  var delNote = null;
   var delAll = null;
-  if (pr) {
+  if (pr && !iMade) {
+    var who = masterName();
+    delNote = el('div', 'note-line',
+      '이 수업을 지우려면 담당 선생님' + (who ? '(' + who + ')' : '') + '께 말씀해 주세요.');
+  }
+  if (pr && iMade) {
     var del = el('button', 'btn-danger', '삭제');
     del.addEventListener('click', async function () {
       if (!confirm('이 회차를 지울까요?')) return;
@@ -1599,6 +1662,7 @@ function openTeacherProgramForm(pr) {
   }
 
   f.appendChild(acts);
+  if (delNote) f.appendChild(delNote);
   if (pr) f.appendChild(applyBox);
   f.appendChild(msg);
   box.appendChild(f);
