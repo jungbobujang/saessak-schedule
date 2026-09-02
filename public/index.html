@@ -1506,24 +1506,64 @@ function inlineFlex(pr) {
 }
 
 // ── 내 수업 폼(선생님) ───────────────────────────────
-// 선생님이 직접 적는 수업이다. 담당은 언제나 본인이라 담당 칸이 없다 —
+// 선생님이 직접 적는 수업이다. 담당은 본인(또는 본인과 담당자)이라 담당 칸이 없다 —
 // 서버도 같은 규칙으로 본인만 담당으로 넣는다(화면에서 감추는 것이 아니다).
+// 날짜는 담당자 배정 폼과 같은 방식이다. 매주 같은 수업을 다섯 번 적어야 하는데
+// 한 번에 하나씩만 받으면, 다섯 번 폼을 열게 하고 묶음도 다섯 개로 갈린다.
 function openTeacherProgramForm(pr) {
   if (S.role === 'master') return;
   S.formOpen = true; S.editing = pr;
-  var ds = pr ? pr.date : S.pick;
   var box = panelBox();
   box.innerHTML = '';
   box.appendChild(el('h2', null, pr ? '내 수업 고치기' : '이날 수업 있어요'));
 
   var f = el('div', 'form');
-  f.appendChild(el('div', 'pickhint', shortDate(ds).replace('/', '월 ') + '일에 적습니다.'));
+  var hint = el('div', 'pickhint');
+  f.appendChild(hint);
 
   f.appendChild(el('label', null, '제목'));
   var title = el('input'); title.type = 'text';
   title.value = pr ? pr.title : '';
   title.placeholder = '예: 학년 공개수업';
   f.appendChild(title);
+
+  // 날짜 — 담당자 배정 폼과 같은 칸이다. 여러 날짜를 한 번에 적으면 그것이 한 묶음이 된다.
+  f.appendChild(el('label', null, '날짜'));
+  var dates = el('div', 'datelist');
+  f.appendChild(dates);
+  function addDateLine(v) {
+    var line = el('div', 'dateline');
+    var d = el('input'); d.type = 'date'; d.value = v || S.pick;
+    line.appendChild(d);
+    // ✕ 는 **아직 저장하지 않은 이 목록에서만** 지운다. 저장된 회차를 지우는 것은
+    // 아래 [삭제]·[모든 회차 삭제] 가 하고, 그것은 물어본 다음에 한다.
+    if (dates.children.length > 0) {
+      var x = el('button', null, '✕');
+      x.addEventListener('click', function () { line.remove(); refreshHint(); });
+      line.appendChild(x);
+    }
+    dates.appendChild(line);
+  }
+  addDateLine(pr ? pr.date : S.pick);
+  if (!pr) {
+    var more = el('button', 'linkish', '+ 날짜 추가');
+    more.addEventListener('click', function () { addDateLine(S.pick); refreshHint(); });
+    f.appendChild(more);
+  }
+  function pickedDates() {
+    return [].slice.call(dates.querySelectorAll('input'))
+      .map(function (i) { return i.value; }).filter(Boolean);
+  }
+  // 머리의 한 줄은 지금 몇 날짜에 적는지를 말한다. 날짜가 여럿이면 하나씩 늘어놓는 대신
+  // 개수로 말한다 — 목록은 바로 위에 이미 보이고, 같은 말을 두 번 할 이유가 없다.
+  function refreshHint() {
+    var list = pickedDates();
+    if (list.length > 1) hint.textContent = list.length + '개 날짜에 적습니다.';
+    else if (list.length === 1) hint.textContent = shortDate(list[0]).replace('/', '월 ') + '일에 적습니다.';
+    else hint.textContent = '날짜를 골라 주세요.';
+  }
+  dates.addEventListener('change', refreshHint);
+  refreshHint();
 
   // 고칠 때는 이 자리에 회차 묶음 줄이 들어온다(폼 값을 다 만든 뒤 아래에서 채운다)
   var seriesSlot = el('div');
@@ -1598,14 +1638,18 @@ function openTeacherProgramForm(pr) {
   var save = el('button', 'btn-main', '저장');
   save.addEventListener('click', async function () {
     msg.className = 'formmsg'; msg.textContent = '';
+    var list = pickedDates();
+    if (!list.length) { msg.className = 'formmsg bad'; msg.textContent = '날짜를 골라 주세요.'; return; }
     if (!time.ok()) { msg.className = 'formmsg bad'; msg.textContent = TIME_ERROR; return; }
     save.disabled = true;
     var body = formBody();
     if (pr && applyCb.checked) body.applyToSeries = true;
     try {
+      // 담당자 배정 폼과 같은 길이다 — 여러 날짜는 dates 로 한 번에 보내고, 서버가
+      // 그것을 한 묶음으로 만든다. 날짜는 고칠 때에도 바꿀 수 있다(이 회차만).
       var r;
-      if (pr) { body.date = ds; r = await api('PUT', '/api/programs/' + pr.id, body); }
-      else { body.dates = [ds]; r = await api('POST', '/api/programs', body); }
+      if (pr) { body.date = list[0]; r = await api('PUT', '/api/programs/' + pr.id, body); }
+      else { body.dates = list; r = await api('POST', '/api/programs', body); }
       closeForm();
       await refresh();
       // 건너뛴 회차가 있으면 그냥 넘어가지 않는다 — 모두 적용한 줄 알고 넘어가면

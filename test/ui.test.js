@@ -163,14 +163,47 @@ async function run(c) {
   ok('설명 "켜면 이남건 선생님 일정에도 들어갑니다"',
     f.text.indexOf('켜면 이남건 선생님 일정에도 들어갑니다') >= 0, f.text.slice(0, 400));
 
+  console.log('\n── 선생님 폼의 여러 날짜 (v2.6) ──');
+  function dateCount() { return ev('panelBox().querySelectorAll(".datelist input[type=date]").length'); }
+  eq('새 폼의 날짜는 고른 날 하나', await dateCount(), 1);
+  ok('날짜 한 개일 때 "9월 11일에 적습니다."',
+    (await panelText()).indexOf('9월 11일에 적습니다.') >= 0, (await panelText()).slice(0, 200));
+  ok('[+ 날짜 추가] 가 있다', (await btns()).indexOf('+ 날짜 추가') >= 0, await btns());
+  await click('+ 날짜 추가');
+  eq('[+ 날짜 추가] 를 누르면 날짜 칸이 2개', await dateCount(), 2);
+  ok('두 개일 때 "2개 날짜에 적습니다."',
+    (await panelText()).indexOf('2개 날짜에 적습니다.') >= 0, (await panelText()).slice(0, 200));
+  eq('둘째 줄에만 ✕ 가 붙는다',
+    await ev('panelBox().querySelectorAll(".dateline button").length'), 1);
+  await click('✕');
+  eq('✕ 를 누르면 다시 1개', await dateCount(), 1);
+  ok('다시 "…일에 적습니다."', (await panelText()).indexOf('일에 적습니다.') >= 0);
+
+  // 세 날짜를 실제로 적어 저장한다 → 한 묶음 3회차
+  await click('+ 날짜 추가');
+  await click('+ 날짜 추가');
+  await ev('(function(){var ins=[].slice.call(panelBox().querySelectorAll(".datelist input[type=date]"));' +
+    'ins[0].value="2026-09-11"; ins[1].value="2026-09-18"; ins[2].value="2026-09-25";' +
+    'panelBox().querySelector(".datelist").dispatchEvent(new Event("change",{bubbles:true}));})()');
+  eq('세 개일 때 "3개 날짜에 적습니다."',
+    (await panelText()).indexOf('3개 날짜에 적습니다.') >= 0, true);
+
   await ev('(function(){var c=[].slice.call(panelBox().querySelectorAll("input[type=checkbox]"))' +
     '.filter(function(x){return (x.parentNode.textContent||"").indexOf("담당 선생님과 함께")>=0})[0]; c.checked=true;})()');
   await ev('(function(){panelBox().querySelector("input[type=text]").value="브라우저로 만든 함께 수업";})()');
   await click('저장');
-  await H.sleep(500);
+  await H.sleep(600);
   var saved = await srv.req('master', 'GET', '/api/data?month=2026-09');
-  var made = saved.body.programs.filter(function (p) { return p.title === '브라우저로 만든 함께 수업'; })[0];
-  eq('체크를 켜고 저장하면 teacherIds=[본인,master]', made && made.teacherIds, [T1, 'master']);
+  var mades = saved.body.programs.filter(function (p) { return p.title === '브라우저로 만든 함께 수업'; });
+  eq('세 날짜가 모두 만들어졌다', mades.length, 3);
+  eq('날짜가 고른 그대로',
+    mades.map(function (p) { return p.date; }).sort(), ['2026-09-11', '2026-09-18', '2026-09-25']);
+  var one = mades[0].seriesId;
+  ok('셋이 한 묶음', one && mades.every(function (p) { return p.seriesId === one; }),
+    mades.map(function (p) { return p.seriesId; }));
+  ok('체크를 켜고 저장하면 teacherIds=[본인,master]',
+    mades.every(function (p) { return JSON.stringify(p.teacherIds) === JSON.stringify([T1, 'master']); }),
+    mades.map(function (p) { return p.teacherIds; }));
 
   console.log('\n── 담당자가 잡은 수업의 고치기 폼 ──');
   await goto(DAY);
@@ -186,6 +219,11 @@ async function run(c) {
   ok('[저장] 은 있다(고치기는 된다)', f.btns.indexOf('저장') >= 0, f.btns);
   ok('묶음 담당 상속 안내가 보인다',
     f.text.indexOf('회차를 더하면 담당은 이 묶음 그대로 따라갑니다') >= 0, f.text.slice(0, 700));
+  // 고칠 때는 이 회차 하나다. 회차를 더하는 것은 아래 묶음 줄이 맡는다.
+  eq('고치기 폼의 날짜는 한 칸',
+    await ev('panelBox().querySelectorAll(".datelist input[type=date]").length'), 1);
+  eq('고치기 폼의 날짜 줄에는 ✕ 가 없다',
+    await ev('panelBox().querySelectorAll(".dateline button").length'), 0);
 
   await ev('(function(){panelBox().querySelector("input[type=text]").value="선생님이 고친 제목";})()');
   await click('저장');
