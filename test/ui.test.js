@@ -9,9 +9,17 @@ var fs = require('fs');
 var os = require('os');
 var path = require('path');
 var H = require('./helpers');
+var Palette = require('../public/shared/palette.js');
 
 var t = H.counter();
 var ok = t.ok.bind(t), eq = t.eq.bind(t);
+
+// 화면이 되돌려 주는 색은 언제나 rgb() 꼴이다. 팔레트의 #rrggbb 와 맞대려면 같은 꼴로 바꾼다.
+function rgbOf(hex) {
+  var n = String(hex).replace('#', '');
+  return 'rgb(' + parseInt(n.slice(0, 2), 16) + ', ' +
+    parseInt(n.slice(2, 4), 16) + ', ' + parseInt(n.slice(4, 6), 16) + ')';
+}
 
 var CANDIDATES = [
   process.env.CHROME_PATH,
@@ -306,6 +314,75 @@ async function run(c) {
   await goto('2026-10-03');
   ok('상세 머리에 휴일 이름 유지', (await panelText()).indexOf('개천절') >= 0);
   ok('달력 칸에 휴일 이름 유지', (await ev('!!document.querySelector(".day.holiday .hname")')) === true);
+
+  // ── 설정 화면. 달력 화면을 쓰는 검증 뒤에 둔다 — 여기서 화면을 #setup 으로 넘긴다.
+  console.log('\n── 설정: 선생님 색 고르개 (v1.7 사양) ──');
+  await ev('(function(){ location.hash = "#setup"; })()');
+  for (var si = 0; si < 60; si++) {
+    if (await ev('!document.getElementById("view-setup").classList.contains("hide")' +
+      ' && document.querySelectorAll("#tea-body tr").length > 0')) break;
+    await H.sleep(150);
+  }
+  ok('#setup 이 열렸다',
+    (await ev('!document.getElementById("view-setup").classList.contains("hide")')) === true);
+  eq('선생님 명단 표의 열 머리에 "색" 이 있다',
+    await ev('[].slice.call(document.getElementById("tea-body").closest("table")' +
+      '.querySelectorAll("thead th")).map(function(x){return x.textContent})'),
+    ['이름', '반', 'CODE(4자리, 겹치면 6자리)', '색', '']);
+  eq('줄마다 색 네모가 하나씩',
+    await ev('[document.querySelectorAll("#tea-body tr").length,' +
+      ' document.querySelectorAll("#tea-body .swatch-btn").length]'),
+    [3, 3]);
+  eq('네모에 그 선생님 색이 칠해져 있다',
+    await ev('document.querySelector("#tea-body .swatch-btn").style.backgroundColor'),
+    rgbOf(Palette.COLORS[0]));
+  ok('셀에 [직접 고르기]용 color 입력이 숨어 있다',
+    (await ev('!!document.querySelector("#tea-body td input[type=color].hide")')) === true);
+  eq('팝오버는 처음엔 닫혀 있다', await ev('document.querySelectorAll(".cpop").length'), 0);
+
+  // 색 네모 클릭 → 견본 10개 + [직접 고르기]
+  await ev('document.querySelector("#tea-body .swatch-btn").click()');
+  await H.sleep(150);
+  eq('네모를 누르면 팝오버가 하나 열린다', await ev('document.querySelectorAll(".cpop").length'), 1);
+  eq('견본은 10개', await ev('document.querySelectorAll(".cpop .cpop-grid .cpop-cell").length'), 10);
+  eq('견본 색이 팔레트 10색 그대로',
+    await ev('[].slice.call(document.querySelectorAll(".cpop .cpop-grid .cpop-cell"))' +
+      '.map(function(b){return b.style.backgroundColor})'),
+    Palette.COLORS.map(rgbOf));
+  eq('[직접 고르기] 가 있다',
+    await ev('(document.querySelector(".cpop .cpop-own") || {}).textContent'), '직접 고르기');
+  eq('지금 쓰는 색 한 칸에만 ✓(.on)',
+    await ev('document.querySelectorAll(".cpop .cpop-grid .cpop-cell.on").length'), 1);
+  ok('남이 쓰는 색은 흐리게(.dim) 둔다',
+    (await ev('document.querySelectorAll(".cpop .cpop-grid .cpop-cell.dim").length')) >= 2);
+  eq('흐린 칸에는 누가 쓰는지 붙는다',
+    await ev('document.querySelector(".cpop .cpop-grid .cpop-cell.dim").title.indexOf("선생님이 쓰는 색") > 0'),
+    true);
+
+  // 견본을 고르면 그 줄 색이 바뀌고 팝오버는 닫힌다
+  await ev('document.querySelectorAll(".cpop .cpop-grid .cpop-cell")[5].click()');
+  await H.sleep(150);
+  eq('견본을 고르면 팝오버가 닫힌다', await ev('document.querySelectorAll(".cpop").length'), 0);
+  eq('고른 색이 네모에 바로 보인다',
+    await ev('document.querySelector("#tea-body .swatch-btn").style.backgroundColor'),
+    rgbOf(Palette.COLORS[5]));
+  eq('숨은 color 입력도 같은 값', await ev('document.querySelector("#tea-body td input[type=color]").value'),
+    Palette.COLORS[5]);
+
+  // 같은 네모를 다시 누르면 토글로 닫힌다
+  await ev('document.querySelector("#tea-body .swatch-btn").click()');
+  await H.sleep(120);
+  eq('다시 열림', await ev('document.querySelectorAll(".cpop").length'), 1);
+  await ev('document.querySelector("#tea-body .swatch-btn").click()');
+  await H.sleep(120);
+  eq('같은 네모를 또 누르면 닫힌다(토글)', await ev('document.querySelectorAll(".cpop").length'), 0);
+
+  // 바깥을 누르면 닫힌다
+  await ev('document.querySelector("#tea-body .swatch-btn").click()');
+  await H.sleep(120);
+  await ev('document.getElementById("room-name").click()');
+  await H.sleep(120);
+  eq('바깥을 누르면 닫힌다', await ev('document.querySelectorAll(".cpop").length'), 0);
 }
 
 async function main() {
