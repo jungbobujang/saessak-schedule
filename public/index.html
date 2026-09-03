@@ -380,11 +380,11 @@ td input[type=color]{width:38px;height:30px;padding:0;border:1px solid var(--lin
       <div class="panel hide" id="day-inline" style="margin-top:10px"></div>
       <div class="chips" id="chips"></div>
       <div class="note-line hide" id="teacher-note">
-        내 수업과 내가 적은 안 되는 날이 보입니다. 다른 선생님이 적은 안 되는 날은 그분이 알리기로 한 것만 보입니다.
+        내 수업과 내가 "안 돼요" 라고 적은 날이 보입니다. 다른 선생님이 적은 것은 그분이 알리기로 한 것만 보입니다.
       </div>
       <div class="legend">
         <span><i class="lg-p"></i>디지털새싹 수업</span>
-        <span><i class="lg-b"></i>안 되는 날(개인)</span>
+        <span><i class="lg-b"></i>안 돼요(개인)</span>
         <span><i class="lg-c"></i>겹침</span>
         <span><i class="lg-h"></i>휴일</span>
         <span class="ver" id="ver"></span>
@@ -1265,7 +1265,7 @@ function renderPanel() {
       acts2.appendChild(fix);
       var del = el('button', 'btn-sm btn-danger', '지우기');
       del.addEventListener('click', async function () {
-        if (!window.confirm('이 안 되는 날을 지울까요?')) return;
+        if (!window.confirm('이날 "안 돼요" 를 지울까요?')) return;
         try { await api('DELETE', '/api/blocks/' + bl.id); await refresh(); toast('지웠어요'); }
         catch (e) { alert('지우지 못했어요: ' + e.message); }
       });
@@ -1313,7 +1313,7 @@ function renderPanel() {
     var addP = el('button', 'btn-main', '+ 수업 배정');
     addP.addEventListener('click', function () { openProgramForm(null); });
     acts.appendChild(addP);
-    var addB = el('button', null, '+ 내 안 되는 날');
+    var addB = el('button', null, '+ 나도 이날 안 돼요');
     addB.addEventListener('click', function () { openBlockForm(); });
     acts.appendChild(addB);
   } else {
@@ -1836,7 +1836,7 @@ function openProgramForm(pr, plan) {
   joinLab.appendChild(joinCb);
   joinLab.appendChild(document.createTextNode('나도 참석해야 하는 수업'));
   join.appendChild(joinLab);
-  join.appendChild(el('div', 'hint', '켜면 내 안 되는 날과 겹치는지 확인합니다'));
+  join.appendChild(el('div', 'hint', '켜면 내가 "안 돼요" 라고 적은 날과 겹치는지 확인합니다'));
   f.appendChild(join);
 
   var vis = el('div', 'vis');
@@ -1956,7 +1956,7 @@ function openBlockForm(bl) {
   S.formOpen = true;
   var box = panelBox();
   box.innerHTML = '';
-  box.appendChild(el('h2', null, bl ? '안 되는 날 고치기' : '이날 안 돼요'));
+  box.appendChild(el('h2', null, bl ? '이날 안 돼요 고치기' : '이날 안 돼요'));
   var f = el('div', 'form');
 
   // 날짜는 고칠 때에도 바꿀 수 있다. 하루가 밀린 것을 지웠다 다시 적게 하면

@@ -146,6 +146,9 @@ async function run(c) {
   ok('담당자가 잡은 수업에 [고치기] 노출', b.indexOf('고치기') >= 0, b);
   ok('담당자가 잡은 수업에 [지우기] 없음', b.indexOf('지우기') < 0, b);
   ok('선생님 상세에 "고침" 줄이 없음', txt.indexOf('선생님이 고침') < 0, txt);
+  eq('선생님 안내줄 문구 (v2.6.1)',
+    await ev('document.getElementById("teacher-note").textContent.trim()'),
+    '내 수업과 내가 "안 돼요" 라고 적은 날이 보입니다. 다른 선생님이 적은 것은 그분이 알리기로 한 것만 보입니다.');
 
   await goto(DAY2);
   b = await btns();
@@ -260,6 +263,35 @@ async function run(c) {
   await goto('2026-10-20');
   ok('빈 날은 그대로', (await panelText()).indexOf('이날은 적힌 일정이 없어요') >= 0);
 
+  console.log('\n── 문구: "안 돼요" (v2.6.1) ──');
+  await goto(DAY);
+  b = await btns();
+  ok('담당자 상세 단추는 [+ 나도 이날 안 돼요]', b.indexOf('+ 나도 이날 안 돼요') >= 0, b);
+  ok('옛 문구 [+ 내 안 되는 날] 은 없다', b.indexOf('+ 내 안 되는 날') < 0, b);
+  eq('범례는 "안 돼요(개인)"',
+    await ev('[].slice.call(document.querySelectorAll(".legend span"))' +
+      '.map(function(s){return s.textContent}).filter(function(s){return s.indexOf("개인")>=0})[0]'),
+    '안 돼요(개인)');
+  ok('달력 화면 어디에도 "안 되는 날" 이 없다',
+    (await ev('document.body.innerText')).indexOf('안 되는 날') < 0);
+
+  ok('[+ 나도 이날 안 돼요] 눌림', (await click('+ 나도 이날 안 돼요')) === true);
+  f = await formInfo();
+  ok('새로 적는 폼 제목은 "이날 안 돼요"', f.text.indexOf('이날 안 돼요') >= 0, f.text.slice(0, 200));
+  ok('폼에 "안 되는 날" 이 없다', f.text.indexOf('안 되는 날') < 0, f.text.slice(0, 400));
+  await ev('(function(){ S.formOpen=false; })()');
+
+  // 이미 적어 둔 날의 [고치기] 폼 제목
+  await srv.req('master', 'POST', '/api/blocks', { date: '2026-10-20', slot: 'all', memo: '문구 확인' });
+  await goto('2026-10-20');
+  txt = await panelText();
+  ok('적어 둔 날 상세에도 "안 되는 날" 이 없다', txt.indexOf('안 되는 날') < 0, txt.slice(0, 400));
+  await click('고치기');
+  f = await formInfo();
+  ok('고치기 폼 제목은 "이날 안 돼요 고치기"',
+    f.text.indexOf('이날 안 돼요 고치기') >= 0, f.text.slice(0, 200));
+  await ev('(function(){ S.formOpen=false; })()');
+
   console.log('\n── 회귀: 담당자 배정 폼·휴일 ──');
   await goto(DAY);
   ok('[+ 수업 배정] 눌림', (await click('+ 수업 배정')) === true);
@@ -267,6 +299,8 @@ async function run(c) {
   ok('담당 선생님 체크칸이 있다', f.cbs.length >= 2, f.cbs.length);
   ok('휴일 경고 없음 (v2.4.1 유지)', f.text.indexOf('그래도 배정할까요') < 0, f.text.slice(0, 400));
   ok('"나도 참석해야 하는 수업" 유지', f.text.indexOf('나도 참석해야 하는 수업') >= 0, f.text.slice(0, 500));
+  ok('그 설명은 "켜면 내가 \\"안 돼요\\" 라고 적은 날과 겹치는지 확인합니다"',
+    f.text.indexOf('켜면 내가 "안 돼요" 라고 적은 날과 겹치는지 확인합니다') >= 0, f.text.slice(0, 500));
 
   await ev('(function(){ S.formOpen=false; })()');
   await goto('2026-10-03');
