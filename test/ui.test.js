@@ -66,10 +66,17 @@ function cdp(wsUrl) {
 
 var srv, T1, T2, P_MASTER, P_MINE;
 var DAY = '2026-09-10', DAY2 = '2026-09-11';
+// 담당자(이남건)가 혼자 하는 비공개 수업. 김솔지 화면에는 실물이 아니라
+// "이남건 · 오전 안 됨" 이라는 빗금 카드 한 장으로만 와야 한다 (v2.7).
+var BUSY_DAY = '2026-09-15';
 
 async function seed() {
   var ids = await H.seedRoom(srv);
   T1 = ids.T1; T2 = ids.T2;
+  await srv.req('master', 'POST', '/api/programs', {
+    dates: [BUSY_DAY], start: '09:00', end: '12:00',
+    title: '남에게 보이면 안 되는 제목', teacherIds: [], memo: '보이면 안 되는 메모'
+  });
   var r = await srv.req('master', 'POST', '/api/programs', {
     dates: [DAY], start: '09:00', end: '12:00', title: '담당자가 잡은 수업', teacherIds: [T1]
   });
@@ -162,6 +169,43 @@ async function run(c) {
   b = await btns();
   ok('내가 적은 수업에 [고치기] 노출', b.indexOf('고치기') >= 0, b);
   ok('내가 적은 수업에 [지우기] 노출', b.indexOf('지우기') >= 0, b);
+
+  console.log('\n── 남의 비공개 수업은 "안 됨" 으로만 (v2.7) ──');
+  await goto(BUSY_DAY);
+  eq('화면이 받은 busy 는 한 장',
+    await ev('S.busy.filter(function(b){return b.date===' + JSON.stringify(BUSY_DAY) + '}).length'), 1);
+  eq('그 한 장은 이남건 · 오전',
+    await ev('(function(){var b=S.busy.filter(function(x){return x.date===' + JSON.stringify(BUSY_DAY) + '})[0];' +
+      ' return [b.teacherId, b.slot];})()'), ['master', 'am']);
+  eq('수업 실물은 오지 않았다',
+    await ev('S.programs.filter(function(p){return p.date===' + JSON.stringify(BUSY_DAY) + '}).length'), 0);
+  ok('제목·메모는 화면 어디에도 없다',
+    (await ev('document.body.innerText')).indexOf('보이면 안 되는') < 0);
+
+  var cell = 'document.querySelector(\'.day[aria-label^="' + BUSY_DAY + '"]\')';
+  eq('달력 칸에 빗금 카드가 한 장', await ev(cell + '.querySelectorAll(".card.block.busy").length'), 1);
+  eq('카드 글씨는 "이남건 · 오전 안 됨"',
+    await ev(cell + '.querySelector(".card.block.busy").innerText.trim()'), '이남건 · 오전 안 됨');
+  eq('카드 툴팁은 "수업이 있어 안 되는 시간이에요"',
+    await ev(cell + '.querySelector(".card.block.busy").title'), '수업이 있어 안 되는 시간이에요');
+  eq('회색 바탕', await ev('getComputedStyle(' + cell + '.querySelector(".card.block.busy")).backgroundColor'),
+    'rgb(107, 114, 128)');
+  ok('빗금이 깔려 있다',
+    (await ev('getComputedStyle(' + cell + '.querySelector(".card.block.busy")).backgroundImage'))
+      .indexOf('repeating-linear-gradient') >= 0);
+  eq('안 되는 날 카드와 같은 생김새',
+    await ev('(function(){var a=getComputedStyle(' + cell + '.querySelector(".card.block.busy"));' +
+      ' return [a.backgroundColor, a.backgroundImage].join("|");})()'),
+    await ev('(function(){var p=document.createElement("div"); p.className="card block";' +
+      ' document.body.appendChild(p); var a=getComputedStyle(p);' +
+      ' var out=[a.backgroundColor, a.backgroundImage].join("|"); p.remove(); return out;})()'));
+
+  txt = await panelText();
+  ok('상세에도 같은 문구', txt.indexOf('이남건 · 오전 안 됨') >= 0, txt.slice(0, 400));
+  eq('상세의 바쁨 줄은 한 줄뿐', await ev('panelBox().querySelectorAll(".row.busy").length'), 1);
+  eq('바쁨 줄에는 단추가 없다', await ev('panelBox().querySelector(".row.busy").querySelectorAll("button").length'), 0);
+  eq('바쁨 줄 툴팁', await ev('panelBox().querySelector(".row.busy").title'), '수업이 있어 안 되는 시간이에요');
+  ok('상세 어디에도 [고치기] 가 없다', (await btns()).indexOf('고치기') < 0, await btns());
 
   console.log('\n── 선생님 새 수업 폼 ──');
   await goto(DAY2);
@@ -267,6 +311,14 @@ async function run(c) {
   await goto(DAY);
   txt = await panelText();
   ok('담당자가 고친 뒤에는 "고침" 이 사라진다', txt.indexOf('선생님이 고침') < 0, txt.slice(0, 600));
+
+  // 담당자는 모든 수업을 실물로 본다 — '안 됨' 으로 겹쳐 찍히지 않는다 (v2.7)
+  await goto(BUSY_DAY);
+  eq('담당자 화면에는 busy 가 없다', await ev('S.busy.length'), 0);
+  eq('담당자 달력에 빗금 "안 됨" 카드가 없다',
+    await ev('document.querySelectorAll(".card.busy").length'), 0);
+  ok('담당자에게는 제목이 그대로 보인다',
+    (await panelText()).indexOf('남에게 보이면 안 되는 제목') >= 0, (await panelText()).slice(0, 300));
 
   await goto('2026-10-20');
   ok('빈 날은 그대로', (await panelText()).indexOf('이날은 적힌 일정이 없어요') >= 0);

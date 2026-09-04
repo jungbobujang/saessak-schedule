@@ -114,6 +114,9 @@ button:hover{background:#eef1ea}
 #view-login .ver{margin-top:22px}
 .card.block{background:var(--dim);color:#fff;
   background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.28) 0 4px,transparent 4px 8px)}
+/* 바쁨(.busy)은 '안 되는 날' 카드와 **같은 회색 빗금**을 쓴다. 보는 사람에게는 둘 다
+   "그날 그분은 안 된다" 는 한 가지 사실이라, 생김새를 갈라 두면 없는 구분을 만든다.
+   달라지는 것은 툴팁 한 줄뿐이다(별도 규칙 없이 .card.block 을 그대로 물려받는다). */
 .card.clash{outline:2px solid var(--red);outline-offset:-2px}
 .card .tag-all{background:rgba(255,255,255,.28);border-radius:3px;padding:0 3px;margin-left:3px;font-size:10px}
 
@@ -530,6 +533,9 @@ async function api(method, url, body) {
 var S = {
   role: null, me: null, room: { name: '' },
   teachers: [], programs: [], blocks: [],
+  // 남의 비공개 수업이 시간대만 남기고 온 것(v2.7). blocks 와 **절대 섞지 않는다** —
+  // 섞는 순간 겹침 판정과 가능 인원 셈에 남의 수업이 슬며시 들어간다.
+  busy: [],
   month: null,            // 'YYYY-MM'
   pick: today(),          // 선택한 날짜
   hidden: {},             // 칩으로 끈 선생님 id
@@ -849,6 +855,17 @@ function mergeById(list) {
   list.forEach(function (x) { if (!seen[x.id]) { seen[x.id] = true; out.push(x); } });
   return out;
 }
+// 바쁨에는 id 가 없다 — 저장된 것이 아니라 서버가 지어낸 파생 표시이기 때문이다.
+// 달을 세 번 불러오면 겹치는 주가 두 번 오므로 사람·날짜로 묶고 시간대를 합친다.
+function mergeBusy(list) {
+  var byKey = {}, order = [];
+  list.forEach(function (b) {
+    var k = b.date + '|' + b.teacherId;
+    if (!byKey[k]) { byKey[k] = { date: b.date, teacherId: b.teacherId, slot: b.slot }; order.push(k); }
+    else byKey[k].slot = Slots.mergeBusySlot(byKey[k].slot, b.slot);
+  });
+  return order.map(function (k) { return byKey[k]; });
+}
 
 async function refresh() {
   try {
@@ -859,6 +876,8 @@ async function refresh() {
     S.teachers = d.teachers;
     S.programs = mergeById(packs.reduce(function (a, p) { return a.concat(p.programs); }, []));
     S.blocks = mergeById(packs.reduce(function (a, p) { return a.concat(p.blocks); }, []));
+    // 담당자 응답에는 busy 라는 칸 자체가 없다 — 그때는 빈 목록이 된다.
+    S.busy = mergeBusy(packs.reduce(function (a, p) { return a.concat(p.busy || []); }, []));
     S.schoolHolidays = (d.room && d.room.schoolHolidays) || [];
     renderCal();
   } catch (e) {
@@ -981,6 +1000,18 @@ function blockCardEl(bl) {
   return c;
 }
 
+// 바쁨 — 남의 비공개 수업이 시간대만 남기고 온 것. "이남건 · 오전 안 됨".
+// 이름은 언제나 붙는다: 내 수업은 실물로 오므로 여기 올 일이 없다.
+// 생김새는 '안 되는 날' 카드와 같게 둔다 — 보는 사람에게는 둘 다 "그날 그 사람은
+// 안 된다" 는 한 가지 사실이다. 다른 것은 툴팁 한 줄뿐이다.
+function busyLabel(bu) { return nameOf(bu.teacherId) + ' · ' + Slots.busyText(bu.slot); }
+function busyCardEl(bu) {
+  var c = el('div', 'card block busy');
+  c.title = Slots.BUSY_TIP;
+  c.appendChild(el('div', 'c1', busyLabel(bu)));
+  return c;
+}
+
 function dayCell(dateObj, monthNo) {
   var ds = fmt(dateObj);
   var dow = dateObj.getDay();
@@ -1001,6 +1032,7 @@ function dayCell(dateObj, monthNo) {
 
   var prs = S.programs.filter(function (x) { return x.date === ds && visible(x); });
   var bls = S.blocks.filter(function (x) { return x.date === ds && visible(x); });
+  var bus = S.busy.filter(function (x) { return x.date === ds && visible(x); });
 
   if (S.mobile) {
     // 좁은 화면에서는 칸에 글자를 넣지 않는다. 색 점만 찍고 자세한 것은 아래에서 본다.
@@ -1023,12 +1055,20 @@ function dayCell(dateObj, monthNo) {
       if (blockClashes(bl)) d.classList.add('clash');
       dots.appendChild(d);
     });
-    var rest = prs.length + bls.length - shown;
+    bus.forEach(function (bu) {
+      if (shown >= 4) return;
+      shown++;
+      var d = el('span', 'pdot block busy');
+      d.title = busyLabel(bu) + ' — ' + Slots.BUSY_TIP;
+      dots.appendChild(d);
+    });
+    var rest = prs.length + bls.length + bus.length - shown;
     if (rest > 0) dots.appendChild(el('span', 'more', '+' + rest));
     if (shown > 0) cell.appendChild(dots);
   } else {
     prs.forEach(function (pr) { cell.appendChild(programCardEl(pr)); });
     bls.forEach(function (bl) { cell.appendChild(blockCardEl(bl)); });
+    bus.forEach(function (bu) { cell.appendChild(busyCardEl(bu)); });
   }
 
   // 마스터에게만: 평일 칸 우하단에 그날 '안 되는 날' 을 적지 않은 선생님 수.
@@ -1114,10 +1154,11 @@ function renderUpcoming() {
   var days = {};
   function put(ds, kind, item) {
     if (ds < from || ds > to) return;
-    (days[ds] = days[ds] || { programs: [], blocks: [] })[kind].push(item);
+    (days[ds] = days[ds] || { programs: [], blocks: [], busy: [] })[kind].push(item);
   }
   S.programs.forEach(function (p) { if (visible(p)) put(p.date, 'programs', p); });
   S.blocks.forEach(function (b) { if (visible(b)) put(b.date, 'blocks', b); });
+  S.busy.forEach(function (b) { if (visible(b)) put(b.date, 'busy', b); });
 
   var keys = Object.keys(days).sort();
   if (keys.length === 0) {
@@ -1142,6 +1183,7 @@ function renderUpcoming() {
     wrap.appendChild(head);
     days[ds].programs.forEach(function (p) { wrap.appendChild(programCardEl(p)); });
     days[ds].blocks.forEach(function (b) { wrap.appendChild(blockCardEl(b)); });
+    days[ds].busy.forEach(function (b) { wrap.appendChild(busyCardEl(b)); });
     box.appendChild(wrap);
   });
 }
@@ -1272,6 +1314,15 @@ function renderPanel() {
       acts2.appendChild(del);
       r.appendChild(acts2);
     }
+    box.appendChild(r);
+  });
+
+  // 바쁨 — 남의 비공개 수업. 여기서도 그 한 문구뿐이고, 고칠 것이 없다.
+  // 내 것이 아니라 남의 사정이고, 애초에 고칠 수 있는 실물이 여기 없다.
+  S.busy.filter(function (b) { return b.date === ds; }).forEach(function (bu) {
+    var r = el('div', 'row busy');
+    r.title = Slots.BUSY_TIP;
+    r.appendChild(el('div', 'ttl', busyLabel(bu)));
     box.appendChild(r);
   });
 

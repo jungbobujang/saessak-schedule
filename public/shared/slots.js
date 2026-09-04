@@ -117,6 +117,35 @@
     return end > NOON;   // pm
   }
 
+  // ── 바쁨(busy) — 남의 비공개 수업을 시간대만 남긴 사실로 바꾼 것 ──────────
+  // 다른 선생님의 수업은 그분이 '전체 공개' 로 고르지 않는 한 응답에 담기지 않는다.
+  // 그런데 아무것도 안 보이면 남은 사람은 그날이 비어 있는 줄 안다. 그래서 **제목도
+  // 시간도 아닌 시간대 한 칸만** 남겨 "그때는 안 됨" 이라고만 말한다.
+  // 이것은 그 사람이 적은 '안 되는 날'(block)이 아니라 서버가 지어낸 파생 표시다 —
+  // 겹침 판정에도 가능 인원 셈에도 쓰지 않는다. 알아 두시라고 보이는 것뿐이다.
+  //
+  // 12:00 을 가운데 두고 가른다. 시간이 비어 있으면 종일 수업으로 본다.
+  function busySlotOf(pr) {
+    var s = pr && pr.start, e = pr && pr.end;
+    if (!s || !e) return 'all';
+    if (s < NOON && e > NOON) return 'all';
+    if (s < NOON) return 'am';
+    return 'pm';
+  }
+  // 한 사람의 하루에 수업이 여럿이면 시간대를 **합집합**으로 본다(오전+오후=종일).
+  function mergeBusySlot(a, b) {
+    if (!a) return b || 'all';
+    if (!b) return a;
+    return a === b ? a : 'all';
+  }
+  // 카드·상세에 적는 말. 부르는 쪽이 앞에 이름을 붙인다 → "이남건 · 오전 안 됨"
+  function busyText(slot) {
+    var s = isSlot(slot) ? slot : 'all';
+    return (s === 'all' ? '' : LABEL[s] + ' ') + '안 됨';
+  }
+  // 왜 안 되는지까지는 말하지 않는다. 툴팁 한 줄만 둔다.
+  var BUSY_TIP = '수업이 있어 안 되는 시간이에요';
+
   // 그 사람의 그날 block 들을 모아 하루 상태를 낸다.
   //   free       가능 인원으로 세는가
   //   availLabel 상세 목록에 덧붙일 말 ('오후만 가능' 등). 온전히 가능하면 null
@@ -146,6 +175,7 @@
     isSlot: isSlot, slotOf: slotOf, memoOf: memoOf, slotLabel: slotLabel,
     isVis: isVis, visOf: visOf, narrowestVis: narrowestVis,
     visBtnLabel: visBtnLabel, visTagLabel: visTagLabel,
-    blockCardText: blockCardText, blockHitsProgram: blockHitsProgram, dayStatus: dayStatus
+    blockCardText: blockCardText, blockHitsProgram: blockHitsProgram, dayStatus: dayStatus,
+    BUSY_TIP: BUSY_TIP, busySlotOf: busySlotOf, mergeBusySlot: mergeBusySlot, busyText: busyText
   };
 });

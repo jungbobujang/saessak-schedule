@@ -188,6 +188,34 @@ function shapeProgram(p, forMaster) {
   return out;
 }
 
+// 남의 비공개 수업을 '바쁨' 으로 바꿀 때 이름표로 세울 한 사람.
+// 담당자(master)는 어느 수업에나 낄 수 있으므로 대표가 되지 못한다 — 담당 선생님 중
+// 첫 사람을 세우고, 그런 사람이 없을 때(담당자 혼자 하는 수업)만 'master' 다.
+function busyOwner(p) {
+  var ids = (p.teacherIds || []).filter(function (id) { return id !== 'master'; });
+  return ids.length ? ids[0] : 'master';
+}
+// 비공개 수업 목록 → { date, teacherId, slot } 만 남긴 파생 항목.
+// **여기서 만드는 객체에는 제목·메모·시간·seriesId 가 들어갈 자리가 아예 없다** —
+// 원본에서 골라 빼는 것이 아니라 세 칸짜리 새 객체를 짓는다. 그래야 나중에 수업에
+// 칸이 하나 더 늘어도 그것이 조용히 따라 나가지 않는다.
+// 같은 사람·같은 날은 시간대를 합쳐 한 장으로 만든다.
+function busyFrom(programs) {
+  var byKey = {}, order = [];
+  programs.forEach(function (p) {
+    var who = busyOwner(p);
+    var key = p.date + '|' + who;
+    var slot = Slots.busySlotOf(p);
+    if (!byKey[key]) {
+      byKey[key] = { date: p.date, teacherId: who, slot: slot };
+      order.push(key);
+      return;
+    }
+    byKey[key].slot = Slots.mergeBusySlot(byKey[key].slot, slot);
+  });
+  return order.map(function (k) { return byKey[k]; });
+}
+
 // 요청자 시점 필터. 선생님에게는 남의 '안 되는 날'을 그 사람이 알리기로 한 만큼만 담는다.
 function filterFor(session, d, range) {
   var inRange = function (dt) { return dt >= range.from && dt <= range.to; };
@@ -195,19 +223,25 @@ function filterFor(session, d, range) {
   // 합치기가 먼저다 — 같은 사람의 하루가 여러 장이면 그 묶음의 공개 범위를 정한 뒤에
   // 걸러야, 좁게 적어 둔 쪽의 메모가 넓은 쪽에 얹혀 새어 나가지 않는다.
   var blocks = mergeBlocks(d.blocks.filter(function (b) { return inRange(b.date); }));
+  var busy = null;
   if (session.role !== 'master') {
     var id = session.teacherId;
-    programs = programs.filter(function (p) {
+    var mineOrOpen = function (p) {
       return (p.teacherIds || []).indexOf(id) >= 0 || p.visibility === 'all';
+    };
+    // 빼는 것과 바쁨으로 바꾸는 것은 **같은 한 줄의 앞뒷면**이다. 두 군데에서 따로
+    // 판정하면 언젠가 한쪽만 고쳐져 비공개 수업이 실물로 새거나, 보이는 수업이
+    // '안 됨' 으로 겹쳐 찍힌다.
+    busy = busyFrom(programs.filter(function (p) { return !mineOrOpen(p); }));
     // planId 는 담당자의 신청 관리용 값이다. 선생님 응답에는 담지 않는다.
-    }).map(function (p) { return shapeProgram(p, false); });
+    programs = programs.filter(mineOrOpen).map(function (p) { return shapeProgram(p, false); });
     blocks = blocks.map(function (b) {
       return b.teacherId === id ? b : shareBlock(b);   // 내 것은 그대로, 남의 것은 걸러서
     }).filter(Boolean);
   } else {
     programs = programs.map(function (p) { return shapeProgram(p, true); });
   }
-  return { programs: programs, blocks: blocks };
+  return { programs: programs, blocks: blocks, busy: busy };
 }
 
 // 선생님에게 나가는 명단에는 code 를 넣지 않는다.
@@ -301,6 +335,9 @@ app.get('/api/data', requireAuth, function (req, res) {
     teachers: publicTeachers(req.session, d),
     programs: v.programs,
     blocks: v.blocks,
+    // 남의 비공개 수업을 시간대만 남긴 파생 표시(v2.7). 담당자 응답에는 이 칸이 없다 —
+    // 담당자는 모든 수업을 실물로 보므로 같은 사실을 두 번 적을 이유가 없다.
+    busy: v.busy || [],
     range: range
   });
 });

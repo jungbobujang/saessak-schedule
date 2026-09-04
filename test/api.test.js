@@ -44,6 +44,24 @@ function unitTests() {
   eq('종일이면 불가', Slots.dayStatus([{ slot: 'all' }]).free, false);
   eq('오후만 안 되면 폼 라벨', Slots.dayStatus([{ slot: 'pm' }]).formLabel, '(오후 안 됨)');
 
+  console.log('\n── 함수: 바쁨(남의 비공개 수업) 시간대 (v2.7) ──');
+  eq('오전에 끝나면 오전', Slots.busySlotOf({ start: '09:00', end: '12:00' }), 'am');
+  eq('12시를 넘기면 종일', Slots.busySlotOf({ start: '09:00', end: '15:00' }), 'all');
+  eq('정오에 시작하면 오후', Slots.busySlotOf({ start: '12:00', end: '14:00' }), 'pm');
+  eq('오후에 시작하면 오후', Slots.busySlotOf({ start: '13:00', end: '15:00' }), 'pm');
+  eq('11:59–12:01 도 종일', Slots.busySlotOf({ start: '11:59', end: '12:01' }), 'all');
+  eq('시간이 없으면 종일', Slots.busySlotOf({}), 'all');
+  eq('끝만 없어도 종일', Slots.busySlotOf({ start: '09:00' }), 'all');
+  eq('오전+오후는 종일', Slots.mergeBusySlot('am', 'pm'), 'all');
+  eq('오전+오전은 오전', Slots.mergeBusySlot('am', 'am'), 'am');
+  eq('종일+오전은 종일', Slots.mergeBusySlot('all', 'am'), 'all');
+  eq('앞이 비면 뒤를 따른다', Slots.mergeBusySlot(null, 'pm'), 'pm');
+  eq('busyText 종일은 "안 됨"', Slots.busyText('all'), '안 됨');
+  eq('busyText 오전', Slots.busyText('am'), '오전 안 됨');
+  eq('busyText 오후', Slots.busyText('pm'), '오후 안 됨');
+  eq('busyText 엉뚱한 값은 종일로', Slots.busyText('wat'), '안 됨');
+  eq('바쁨 툴팁 문구', Slots.BUSY_TIP, '수업이 있어 안 되는 시간이에요');
+
   console.log('\n── 함수: 조율·만든 사람·고친 사람 ──');
   eq('flexOf 기본은 확인 필요', Slots.flexOf({}), 'unknown');
   eq('flexOf 는 엉뚱한 값도 unknown', Slots.flexOf({ flex: 'wat' }), 'unknown');
@@ -287,6 +305,81 @@ async function apiTests() {
     sd.body.blocks.filter(function (b) { return b.date === '2026-09-26' && b.teacherId === T2; }).length, 0);
   r = await req('yun', 'POST', '/api/blocks', { date: '2026-09-25', slot: 'all', visibility: 'fact' });
   ok('같은 날 다시 적으면 덮어쓴다(쌓이지 않는다)', r.body.replaced === true, r.body);
+
+  console.log('\n── 남의 비공개 수업 → 바쁨(안 됨) (v2.7) ──');
+  // 담당자가 윤상혁에게만 잡아 준 수업. 김솔지는 담당이 아니고 전체 공개도 아니다.
+  await req('master', 'POST', '/api/programs', {
+    dates: ['2026-11-02'], start: '09:00', end: '12:00', title: '남의 비밀 수업',
+    teacherIds: [T2], memo: '보이면 안 되는 메모'
+  });
+  var solD = await req('sol', 'GET', '/api/data?month=2026-11');
+  var yunD = await req('yun', 'GET', '/api/data?month=2026-11');
+  eq('담당 아닌 사람 programs 에는 없다',
+    solD.body.programs.filter(function (p) { return p.date === '2026-11-02'; }).length, 0);
+  var bz = solD.body.busy.filter(function (b) { return b.date === '2026-11-02'; });
+  eq('대신 busy 가 한 장', bz.length, 1);
+  eq('09:00–12:00 은 오전', bz[0] && bz[0].slot, 'am');
+  eq('대표는 담당 선생님', bz[0] && bz[0].teacherId, T2);
+  eq('busy 에는 세 칸뿐', bz[0] && Object.keys(bz[0]).sort(), ['date', 'slot', 'teacherId']);
+  ok('title 칸이 없다', bz[0] && !('title' in bz[0]), bz[0]);
+  ok('memo·start·end·seriesId 칸도 없다',
+    bz[0] && !('memo' in bz[0]) && !('start' in bz[0]) && !('end' in bz[0]) && !('seriesId' in bz[0]), bz[0]);
+  ok('담당인 사람에게는 수업 실물이 간다',
+    yunD.body.programs.filter(function (p) { return p.title === '남의 비밀 수업'; }).length === 1,
+    yunD.body.programs.length);
+  eq('담당인 사람에게는 그 날 busy 가 없다',
+    yunD.body.busy.filter(function (b) { return b.date === '2026-11-02'; }).length, 0);
+
+  // 정오를 넘기는 수업은 종일
+  await req('master', 'POST', '/api/programs', {
+    dates: ['2026-11-03'], start: '09:00', end: '15:00', title: '긴 수업', teacherIds: [T2]
+  });
+  solD = await req('sol', 'GET', '/api/data?month=2026-11');
+  eq('09:00–15:00 은 종일',
+    solD.body.busy.filter(function (b) { return b.date === '2026-11-03'; })[0].slot, 'all');
+
+  // 같은 사람·같은 날 오전 수업 + 오후 수업 → 한 장으로 합쳐 종일
+  await req('master', 'POST', '/api/programs', {
+    dates: ['2026-11-04'], start: '09:00', end: '11:00', title: '오전 것', teacherIds: [T2]
+  });
+  await req('master', 'POST', '/api/programs', {
+    dates: ['2026-11-04'], start: '13:00', end: '15:00', title: '오후 것', teacherIds: [T2]
+  });
+  solD = await req('sol', 'GET', '/api/data?month=2026-11');
+  var two = solD.body.busy.filter(function (b) { return b.date === '2026-11-04'; });
+  eq('수업 두 개라도 busy 는 한 장', two.length, 1);
+  eq('오전+오후는 종일로 합쳐진다', two[0].slot, 'all');
+
+  // 전체 공개 수업은 종전 그대로 실물로 보인다 — 바쁨으로 바뀌지 않는다
+  await req('master', 'POST', '/api/programs', {
+    dates: ['2026-11-07'], start: '09:00', end: '11:00', title: '모두 보는 수업',
+    teacherIds: [T2], visibility: 'all'
+  });
+  solD = await req('sol', 'GET', '/api/data?month=2026-11');
+  eq('전체 공개는 실물로 보인다',
+    solD.body.programs.filter(function (p) { return p.title === '모두 보는 수업'; }).length, 1);
+  eq('전체 공개는 busy 로 바뀌지 않는다',
+    solD.body.busy.filter(function (b) { return b.date === '2026-11-07'; }).length, 0);
+
+  // 담당자가 혼자 하는 수업이면 대표는 'master'
+  await req('master', 'POST', '/api/programs', {
+    dates: ['2026-11-06'], start: '13:00', end: '15:00', title: '담당자 혼자', teacherIds: []
+  });
+  solD = await req('sol', 'GET', '/api/data?month=2026-11');
+  var solo = solD.body.busy.filter(function (b) { return b.date === '2026-11-06'; })[0];
+  eq('담당 선생님이 없으면 대표는 master', solo && solo.teacherId, 'master');
+  eq('13:00–15:00 은 오후', solo && solo.slot, 'pm');
+
+  md = await req('master', 'GET', '/api/data?month=2026-11');
+  ok('마스터 응답에는 busy 칸 자체가 없다', !('busy' in md.body), Object.keys(md.body));
+
+  // 내가 적은 개인 block 은 busy 와 무관하다 (v2.1 규칙 그대로)
+  await req('sol', 'POST', '/api/blocks', { date: '2026-11-02', slot: 'pm', memo: '내 사정' });
+  solD = await req('sol', 'GET', '/api/data?month=2026-11');
+  eq('내 block 은 그대로 온다',
+    solD.body.blocks.filter(function (b) { return b.date === '2026-11-02' && b.teacherId === T1; }).length, 1);
+  eq('같은 날 busy 도 그대로 따로 있다',
+    solD.body.busy.filter(function (b) { return b.date === '2026-11-02'; }).length, 1);
 
   console.log('\n── 회귀: 예정 목록(plans) ──');
   r = await req('master', 'POST', '/api/plans', { title: '새싹 A', teacherIds: [T1] });
